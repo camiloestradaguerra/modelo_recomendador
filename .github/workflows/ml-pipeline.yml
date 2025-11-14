@@ -1,4 +1,4 @@
-name: MLOps Pipeline CI/CD
+name: MLOps Pipeline CI/CD 
 
 on:
   workflow_dispatch:
