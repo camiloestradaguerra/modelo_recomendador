@@ -114,7 +114,6 @@ class S3DataManager:
         )
         return df
 
-
     def save_dataframe_to_s3(self, df: pd.DataFrame, bucket: str, path_destino: str, nombre_archivo: str):
         """Guarda un DataFrame en S3 con timestamp."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -233,10 +232,7 @@ class DataPreprocessingPipeline:
         self.bucket_name = 'dcelip-dev-artifacts-s3'
         self.file_raw_path = 'mlops/input/raw/'
         self.file_procesed_path = 'mlops/input/processed/'
-        self.file_name_socios = 'df_socios_concat_20251114_065013.parquet' #'df_socios_concat.parquet'
-        self.file_name_establecimientos = 'df_establecimientos_concat_20251114_065013.parquet' #'df_establecimientos_concat.parquet'
-        self.file_name_entrenamiento = 'df_entrenamiento_concat_20251114_065014.parquet' #'df_entrenamiento_concat.parquet'
-
+        
     def _load_raw_data(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Load raw data from the newest parquet files in S3 using S3DataManager."""
 
@@ -288,12 +284,21 @@ class DataPreprocessingPipeline:
         print(f"- df_establecimientos: {df_establecimientos.shape}")
         print(f"- df_entrenamiento: {df_entrenamiento.shape}")
 
+        self.df_socios = df_socios
+        self.df_establecimientos = df_establecimientos
+        self.df_entrenamiento = df_entrenamiento
+        
         return df_socios, df_establecimientos, df_entrenamiento
     
     def data_extended(self) -> pd.DataFrame:
         """Cleans and merges socios, establecimientos, and entrenamiento datasets"""
         print("Iniciando proceso de limpieza...")
-        df_socios, df_establecimientos, df_entrenamiento = self._load_raw_data()
+
+        df_socios = self.df_socios 
+        df_establecimientos = self.df_establecimientos 
+        df_entrenamiento = self.df_entrenamiento
+
+        # df_socios, df_establecimientos, df_entrenamiento = self._load_raw_data()
 
         # --- Limpieza socios ---
         df_socios = df_socios[['Id_Persona', 'ESTADO_CIVIL', 'Edad', 'GENERO', 'ROL',
@@ -332,12 +337,12 @@ class DataPreprocessingPipeline:
         df_entrenamiento = df_entrenamiento[df_entrenamiento["Id_Persona"].isin(df_socios["Id_Persona"])]
 
         df_merge1 = df_entrenamiento.merge(df_socios, on='Id_Persona', how='left')
-        data_extendida_clean = (
+        data_extendida = (
             df_merge1.merge(df_establecimientos, on='ID_ESTABLECIMIENTO', how='left')
             .dropna(subset=['CADENA', 'ESTABLECIMIENTO', 'ESPECIALIDAD', 'LOCALIZACION_EXTERNA'])
         )
 
-        return data_extendida_clean
+        return data_extendida
 
     def clean_recent_text_columns(self, df) -> pd.DataFrame:
             
@@ -357,7 +362,6 @@ class DataPreprocessingPipeline:
                                 re.sub(r" \d+", ' ',
                                 texto.lower()))))).strip())
         
-        #df["id_persona"] = pd.to_numeric(df["id_persona"], errors="coerce")
         df['id_persona'] = pd.to_numeric(df['id_persona'], errors='coerce')
         df['id_persona'] = df['id_persona'].astype('Int64')
         df['antiguedad_socio_unico'] = df['antiguedad_socio_unico'].astype(int)
@@ -407,7 +411,7 @@ class DataPreprocessingPipeline:
         
         diccionario_establecimientos = {}
 
-        with open("diccionario_completo.txt", "r", encoding="utf-8") as f:
+        with open("diccionario_establecimientos.txt", "r", encoding="utf-8") as f:
             for linea in f:
                 if ":" in linea:
                     clave, valor = linea.strip().split(":", 1)
@@ -574,15 +578,36 @@ if __name__ == "__main__":
     # # ------------------------------------------------------------
     # logger.info("Generando DataFrame extendido limpio...")
 
-    # data_extendida_clean = pipeline.data_extended()
+    # data_extendida = pipeline.data_extended()
 
-    # logger.info(f"DataFrame extendido generado: { data_extendida_clean.shape}")
+    # logger.info(f"DataFrame extendido generado: { data_extendida.shape}")
 
     # print("\n===== Primeras filas del DataFrame extendido =====")
-    # print( data_extendida_clean.head())
+    # print( data_extendida.head())
     # print("==================================================\n")
 
-    # # ------------------------------------------------------------
+
+    # ------------------------------------------------------------
+    #          2) IDENTIFICAR EL ARCHIVO MÁS RECIENTE POR TIPO
+    # ------------------------------------------------------------
+
+    # logger.info("Buscando archivos data_extendida.py más recientes en el bucket destino por tipo...")
+
+    # df_1 = s3.get_newest_file_by_date(
+    #     bucket_name=BUCKET_DEST,
+    #     prefix=DESTINO_PROCESSED,
+    #     starts_with="data_extendida_clean"
+    # )
+    df_extendida = pd.read_parquet("data_extendida.parquet")
+
+    #df_extendida1 = s3.load_single_parquet(df_extendida)
+    df_extendida1 = pipeline.clean_recent_text_columns(df_extendida)
+    df_extendida2 = pipeline.outliers_filters(df_extendida1)
+    df_extendida3 = pipeline.normalization_establecimientos(df_extendida2)
+    
+    print(df_extendida3.head(4))
+
+ # # ------------------------------------------------------------
     # # Guardar el DataFrame extendido limpio en S3
     # # ------------------------------------------------------------
     # DESTINO_PROCESSED = 'mlops/input/processed/'
@@ -598,24 +623,3 @@ if __name__ == "__main__":
     # except Exception as e:
     #     logger.error(f"No se pudo guardar el DataFrame extendido en S3: {e}")
     #     sys.exit(1)
-
-    # ------------------------------------------------------------
-    # Cargar el archivo data_extendida_clean más reciente desde S3
-    # ------------------------------------------------------------
-    # ------------------------------------------------------------
-    #          2) IDENTIFICAR EL ARCHIVO MÁS RECIENTE POR TIPO
-    # ------------------------------------------------------------
-    logger.info("Buscando archivos data_extendida_clean.py más recientes en el bucket destino por tipo...")
-
-    df_1 = s3.get_newest_file_by_date(
-        bucket_name=BUCKET_DEST,
-        prefix=DESTINO_PROCESSED,
-        starts_with="data_extendida_clean"
-    )
-
-    df_clean1 = s3.load_single_parquet(df_1)
-    df_clean2 = pipeline.clean_recent_text_columns(df_clean1)
-    df_clean3 = pipeline.outliers_filters(df_clean2)
-    # df_clean4 = pipeline.normalization_establecimientos(df_clean3)
-    print(df_clean3.head(4))
-
