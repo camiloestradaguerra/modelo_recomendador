@@ -256,7 +256,7 @@ if __name__ == "__main__":
     
     # Guardado en S3
     pipeline.save_bucket_data(
-        path_destino="mlops/input/processed/",  # solo el path relativo dentro del bucket
+        path_destino=pipeline.file_procesed_path,  # solo el path relativo dentro del bucket
         nombre_archivo="data_extendida_ensayo.parquet",
         df=data_extendida
     )
