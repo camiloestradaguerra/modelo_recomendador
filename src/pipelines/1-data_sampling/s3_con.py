@@ -14,125 +14,107 @@ class S3DataManager:
         self._init_s3()
 
     def _load_env_credentials(self):
-        """Carga credenciales desde variables de entorno (GitHub Actions)."""
+        """Carga las credenciales de AWS desde variables de entorno."""
+        
         self.aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
         self.aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
         self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
 
         if not all([self.aws_access_key, self.aws_secret_key, self.aws_region]):
-            raise ValueError("Faltan variables de entorno AWS.")
+            raise ValueError(
+                "Faltan variables de entorno de AWS. "
+                "Asegúrate de que AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY y AWS_DEFAULT_REGION "
+                "están configuradas en GitHub Actions."
+            )
 
     def _init_s3(self):
-        """Inicializa clientes S3 y filesystem."""
-        self.s3_client = boto3.client(
-            "s3",
+        """Inicializa cliente y sistema de archivos S3."""
+        boto3.client(
+            's3',
             aws_access_key_id=self.aws_access_key,
             aws_secret_access_key=self.aws_secret_key,
-            region_name=self.aws_region,
+            region_name=self.aws_region
         )
 
         self.fs = s3fs.S3FileSystem(
             key=self.aws_access_key,
             secret=self.aws_secret_key,
-            client_kwargs={"region_name": self.aws_region},
+            client_kwargs={'region_name': self.aws_region}
         )
 
-    # ----------------------------------------------------------------------
-    # Optimización: No concatenar en RAM — escribir incrementalmente
-    # ----------------------------------------------------------------------
-    def concat_files_streaming(self, type, year, month, day):
-        """
-        Lee múltiples archivos Parquet y genera un único Parquet final,
-        sin cargar todo en RAM, usando escritura incremental.
-        """
-
-        prefix = f"source=teradata/type={type}/year={year}/month={month}/day={day}/"
-        path_s3 = f"{self.bucket_source}/{prefix}"
+    def concat_files(self, type, year, month, day):
+        """Concatena todos los archivos Parquet de una carpeta S3 leyendo uno por uno"""
+        prefix = f'source=teradata/type={type}/year={year}/month={month}/day={day}/'
+        path_s3 = f'{self.bucket_source}/{prefix}'
 
         parquet_files = [
-            f"s3://{file}"
-            for file in self.fs.ls(path_s3)
-            if file.endswith(".parquet")
+            f's3://{file}' 
+            for file in self.fs.ls(path_s3) 
+            if file.endswith('.parquet')
         ]
+        print(f" Archivos encontrados para '{type}': {len(parquet_files)}")
 
-        print(f"Archivos encontrados en '{type}': {len(parquet_files)}")
-
-        if len(parquet_files) == 0:
-            raise ValueError(f"No se encontraron archivos parquet para {type}.")
-
-        # Timestamp para el nombre final
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"concat_{type}_{timestamp}.parquet"
-        temp_local_file = f"/tmp/{output_file}"
-
-        # Escritura incremental
-        first = True
-        for file in parquet_files:
-            print(f"Leyendo archivo: {file}")
+        df_list = []
+        for file in parquet_files[:1]:
             df = pd.read_parquet(
                 file,
                 storage_options={
-                    "key": self.aws_access_key,
-                    "secret": self.aws_secret_key,
-                },
+                    'key': self.aws_access_key,
+                    'secret': self.aws_secret_key
+                }
             )
+            df_list.append(df)
 
-            # Primer archivo: crea el parquet
-            if first:
-                df.to_parquet(temp_local_file, index=False)
-                first = False
-            else:
-                # Archivos siguientes: append row groups
-                df.to_parquet(
-                    temp_local_file,
-                    index=False,
-                    append=True,
-                    engine="pyarrow",
-                )
+        df_concat = pd.concat(df_list, ignore_index=True)
+        print(f" Registros concatenados: {df_concat.shape[0]}")
 
-        print(f"Archivo concatenado generado: {temp_local_file}")
-        return temp_local_file, output_file
+        return df_concat
 
-    # ----------------------------------------------------------------------
-    # SUBIR A S3
-    # ----------------------------------------------------------------------
-    def upload_to_s3(self, local_path, s3_path):
-        """Sube un archivo local a un bucket S3."""
+    def save_bucket_data(self, path_destino, nombre_archivo, df):
+        """Guarda un DataFrame como parquet en el bucket destino con timestamp."""
+
+        # ===== NUEVA LÓGICA =====
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Dividir nombre y extensión
+        base, ext = nombre_archivo.split(".")
+        nombre_archivo_timestamp = f"{base}_{timestamp}.{ext}"
+        # =========================
+
+        ruta_relativa = f"{path_destino}{nombre_archivo_timestamp}"
+        ruta_s3_destino = f"s3://{self.bucket_dest}/{ruta_relativa}"
+
         try:
-            self.s3_client.upload_file(local_path, self.bucket_dest, s3_path)
-            print(f"Archivo subido correctamente a: s3://{self.bucket_dest}/{s3_path}")
+            with self.fs.open(ruta_s3_destino, 'wb') as f:
+                df.to_parquet(f, index=False)
+            print(f"Archivo guardado correctamente en: {ruta_s3_destino}")
         except Exception as e:
-            print(f"Error subiendo archivo a S3: {e}")
-            raise e
+            print(f"Error al guardar en S3: {e}")
+
 
 
 # =========================
-# BLOQUE PRINCIPAL
+# BLOQUE PRINCIPAL DE PRUEBA
 # =========================
 if __name__ == "__main__":
 
-    bucket_source = "dcelip-dev-brz-blu-s3"
-    bucket_dest = "dcelip-dev-artifacts-s3"
-    TYPES = ["socios", "establecimientos", "demograficas", "cao_entrenamiento"]
+    bucket_source = 'dcelip-dev-brz-blu-s3'
+    bucket_dest = 'dcelip-dev-artifacts-s3'
+    TYPES = ['socios', 'establecimientos', 'demograficas', 'cao_entrenamiento']
 
-    FECHAS = {
-        "socios": ("2025", "11", "5"),
-        "establecimientos": ("2025", "11", "5"),
-        "demograficas": ("2025", "10", "31"),
-        "cao_entrenamiento": ("2025", "11", "6"),
-    }
+    ANHO_SOCIOS, MES_SOCIOS, DIA_SOCIOS = '2025', '11', '5'
+    ANHO_ESTABLECIMIENTOS, MES_ESTABLECIMIENTOS, DIA_ESTABLECIMIENTOS = '2025', '11', '5'
+    ANHO_DEMOGRAFICAS, MES_DEMOGRAFICAS, DIA_DEMOGRAFICAS = '2025', '10', '31'
+    ANHO_ENTRENAMIENTO, MES_ENTRENAMIENTO, DIA_ENTRENAMIENTO = '2025', '11', '6'
 
     s3_manager = S3DataManager(bucket_source, bucket_dest)
 
-    for t in TYPES:
-        print(f"\nProcesando tipo: {t}")
-        year, month, day = FECHAS[t]
+    df_socios = s3_manager.concat_files(TYPES[0], ANHO_SOCIOS, MES_SOCIOS, DIA_SOCIOS)
+    df_establecimientos = s3_manager.concat_files(TYPES[1], ANHO_ESTABLECIMIENTOS, MES_ESTABLECIMIENTOS, DIA_ESTABLECIMIENTOS)
+    df_demograficas = s3_manager.concat_files(TYPES[2], ANHO_DEMOGRAFICAS, MES_DEMOGRAFICAS, DIA_DEMOGRAFICAS)
+    df_entrenamiento = s3_manager.concat_files(TYPES[3], ANHO_ENTRENAMIENTO, MES_ENTRENAMIENTO, DIA_ENTRENAMIENTO)
 
-        # 1) Generar parquet concatenado sin usar RAM excesiva
-        local_file, filename = s3_manager.concat_files_streaming(t, year, month, day)
-
-        # 2) Subir a S3
-        destino = f"mlops/input/raw/{filename}"
-        s3_manager.upload_to_s3(local_file, destino)
-
-    print("\nPROCESO COMPLETO SIN ERRORES\n")
+    s3_manager.save_bucket_data('mlops/input/raw/', 'df_socios_concat.parquet', df_socios)
+    s3_manager.save_bucket_data('mlops/input/raw/', 'df_establecimientos_concat.parquet', df_establecimientos)
+    s3_manager.save_bucket_data('mlops/input/raw/', 'df_demograficas_concat.parquet', df_demograficas)
+    s3_manager.save_bucket_data('mlops/input/raw/', 'df_entrenamiento_concat.parquet', df_entrenamiento)
