@@ -5,18 +5,18 @@ import s3fs
 from pathlib import Path
 import re
 import json
-from skimpy import clean_columns
-from dotenv import load_dotenv
+#from skimpy import clean_columns
+from datetime import datetime
+
 
 class DataPreprocessingPipeline:
     """Data preprocessing pipeline for recommendation system"""
 
     def __init__(self):
 
-        load_dotenv()
-        self.aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-        self.aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-        self.aws_region = os.getenv('AWS_DEFAULT_REGION')
+        self.aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        self.aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
 
         if not all([self.aws_access_key, self.aws_secret_key, self.aws_region]):
             raise ValueError("Faltan variables de entorno AWS en el archivo .env")
@@ -24,9 +24,9 @@ class DataPreprocessingPipeline:
         self.bucket_name = 'dcelip-dev-artifacts-s3'
         self.file_raw_path = 'mlops/input/raw/'
         self.file_procesed_path = 'mlops/input/processed/'
-        self.file_name_socios = 'df_socios_concat.parquet'
-        self.file_name_establecimientos = 'df_establecimientos_concat.parquet'
-        self.file_name_entrenamiento = 'df_entrenamiento_concat.parquet'
+        self.file_name_socios = 'df_socios_concat_20251114_065013.parquet' #'df_socios_concat.parquet'
+        self.file_name_establecimientos = 'df_establecimientos_concat_20251114_065013.parquet' #'df_establecimientos_concat.parquet'
+        self.file_name_entrenamiento = 'df_entrenamiento_concat_20251114_065014.parquet' #'df_entrenamiento_concat.parquet'
 
     def _load_raw_data(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Load raw data from parquet files in S3"""
@@ -197,33 +197,66 @@ class DataPreprocessingPipeline:
         # ---------------------------------------------------------
         # Guardar resultado procesado en S3
         # ---------------------------------------------------------
-        s3_uri_output = f's3://{self.bucket_name}/{self.file_procesed_path + "data_extendida_clean3.parquet"}'
+        # s3_uri_output = f's3://{self.bucket_name}/{self.file_procesed_path + "data_extendida_clean3.parquet"}'
 
-        print(f"Guardando archivo procesado en: {s3_uri_output}")
+        # print(f"Guardando archivo procesado en: {s3_uri_output}")
 
-        data_extendida_clean.to_parquet(
-            s3_uri_output,
-            engine='pyarrow',
-            storage_options={
-                'key': self.aws_access_key,
-                'secret': self.aws_secret_key
-            }
-        )
+        # data_extendida_clean.to_parquet(
+        #     s3_uri_output,
+        #     engine='pyarrow',
+        #     storage_options={
+        #         'key': self.aws_access_key,
+        #         'secret': self.aws_secret_key
+        #     }
+        # )
 
-        print("Archivo cargado exitosamente en S3.")
+        # print("Archivo cargado exitosamente en S3.")
 
         return data_extendida_clean
+    
+    def save_bucket_data(self, path_destino, nombre_archivo, df):
+        """Guarda un DataFrame como parquet en el bucket destino con timestamp."""
+
+        # ===== NUEVA LÓGICA =====
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Dividir nombre y extensión
+        base, ext = nombre_archivo.split(".")
+        nombre_archivo_timestamp = f"{base}_{timestamp}.{ext}"
+        # =========================
+
+        ruta_relativa = f"{path_destino}{nombre_archivo_timestamp}"
+        ruta_s3_destino = f"s3://{self.bucket_dest}/{ruta_relativa}"
+
+        try:
+            with self.fs.open(ruta_s3_destino, 'wb') as f:
+                df.to_parquet(f, index=False)
+            print(f"Archivo guardado correctamente en: {ruta_s3_destino}")
+        except Exception as e:
+            print(f"Error al guardar en S3: {e}")
 
 # ---------------------------------------------------------
 # Bloque de prueba
 # ---------------------------------------------------------
+# if __name__ == "__main__":
+#     pipeline = DataPreprocessingPipeline()
+#     data_extendida = pipeline.data_extended()
+#     data_extendida_clean = pipeline.clean_recent_text_columns(data_extendida)
+#     data_extendida_clean_outliers = pipeline.outliers_filters(data_extendida_clean)
+#     data_extendida_clean_outliers_normalizada = pipeline.normalization_establecimientos(data_extendida_clean_outliers)
+#     print("\n Pipeline ejecutado correctamente.")
+#     print(f"Shape final: {data_extendida_clean_outliers.shape}")
+#     print(f"Columnas: {list(data_extendida_clean_outliers.columns)}")
+#     print(data_extendida_clean_outliers.head(5))
 if __name__ == "__main__":
     pipeline = DataPreprocessingPipeline()
     data_extendida = pipeline.data_extended()
-    data_extendida_clean = pipeline.clean_recent_text_columns(data_extendida)
-    data_extendida_clean_outliers = pipeline.outliers_filters(data_extendida_clean)
-    data_extendida_clean_outliers_normalizada = pipeline.normalization_establecimientos(data_extendida_clean_outliers)
-    print("\n Pipeline ejecutado correctamente.")
-    print(f"Shape final: {data_extendida_clean_outliers.shape}")
-    print(f"Columnas: {list(data_extendida_clean_outliers.columns)}")
-    print(data_extendida_clean_outliers.head(5))
+    # Normalización
+    #data_extendida_clean_outliers_normalizada = pipeline.normalization_establecimientos(data_extendida_clean_outliers)
+    
+    # Guardado en S3
+    pipeline.save_bucket_data(
+        path_destino="mlops/input/processed/",  # solo el path relativo dentro del bucket
+        nombre_archivo="data_extendida_ensayo.parquet",
+        df=data_extendida
+    )
