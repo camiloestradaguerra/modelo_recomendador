@@ -1,0 +1,19 @@
+name: model_evaluation
+
+entry_points:
+  main:
+    parameters:
+      model_path:
+        type: str
+      data_path:
+        type: str
+      encoders_path:
+        type: str
+      output_path:
+        type: str
+
+    command: >
+      python main.py --model_path {model_path} \
+                     --data_path {data_path} \
+                     --encoders_path {encoders_path} \
+                     --output_path {output_path}

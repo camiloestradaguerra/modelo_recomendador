@@ -1,0 +1,68 @@
+# Training Configuration
+# Best hyperparameters from Bayesian optimization
+
+model:
+  hidden_dim1: 1024
+  hidden_dim2: 256
+  hidden_dim3: 256
+  dropout_rate: 0.1429465700244763
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001967641848109
+  weight_decay: 0.00008261871088
+  epochs: 50
+  early_stopping_patience: 10
+
+data:
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  random_state: 42
+
+# Feature columns to use (will be dynamically determined from data)
+# These are the engineered features from the previous step
+features:
+  temporal:
+    - hora
+    - dia_semana
+    - mes
+    - hora_sin
+    - hora_cos
+    - dia_sin
+    - dia_cos
+    - mes_sin
+    - mes_cos
+  user:
+    - log_monto
+    - monto_squared
+    - edad
+    - antiguedad_normalizada
+  interaction:
+    - user_establishment_freq
+    - user_specialty_freq
+    - user_city_freq
+    - establishment_popularity
+    - specialty_popularity
+    - city_popularity
+    - hora_ciudad_interaction
+  categorical_encoded:
+    - especialidad_encoded
+    - estado_civil_encoded
+    - genero_encoded
+    - rol_encoded
+    - segmento_comercial_encoded
+    - ciudad_encoded
+    - zona_encoded
+    - region_encoded
+    - cadena_encoded
+    - franja_horaria_encoded
+    - edad_grupo_encoded
+
+# AWS SageMaker Configuration (commented for local development)
+# aws:
+#   instance_type: ml.p3.2xlarge
+#   use_spot_instances: true
+#   max_run: 3600
+#   max_wait: 7200
+#   s3_output: s3://your-bucket/recsys-v3/models/

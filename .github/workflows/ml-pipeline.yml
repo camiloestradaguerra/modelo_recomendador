@@ -1,0 +1,756 @@
+name: MLOps Pipeline CI/CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_all:
+        description: 'Run complete pipeline'
+        required: false
+        default: 'true'
+  push:
+    branches: [master, main]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [master, main]
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # ============================================================================
+  # JOB 0: Setup & Unit Tests
+  # ============================================================================
+  setup:
+    name: Setup & Unit Tests
+    runs-on: ubuntu-latest
+
+    # ------- VARIABLES DE LAS CREDENCIALES DE LOS BUCKETS DE AWS --------
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    # -----------------------------------------------------
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Verificar credenciales cargadas
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$AWS_DEFAULT_REGION" ]; then
+            echo "❌ ERROR: Falta una o más variables de credenciales AWS"
+            exit 1
+          else
+            echo "✅ Credenciales AWS presentes en el entorno del pipeline"
+          fi
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Run unit tests with coverage
+  #       run: |
+  #         pytest src/pipelines/1-data_sampling/test_sampling.py -v --cov=src --cov-report=xml --cov-report=html --cov-report=term
+
+  #     - name: Upload coverage to Codecov
+  #       uses: codecov/codecov-action@v4
+  #       with:
+  #         files: ./coverage.xml
+  #         fail_ci_if_error: false
+
+  #     - name: Upload coverage reports
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: coverage-reports
+  #         path: |
+  #           coverage.xml
+  #           htmlcov/
+  #         retention-days: 30
+
+  #     - name: Upload repository
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: repository
+  #         path: |
+  #           .
+  #           !.git
+  #           !.venv
+  #           !__pycache__
+  #           !*.pyc
+  #         retention-days: 1
+
+  # # ============================================================================
+  # # JOB 1: Data Sampling
+  # # Depends on: setup
+  # # ============================================================================
+  # data-sampling:
+  #   name: Data Sampling (Step 1/6)
+  #   runs-on: ubuntu-latest
+  #   needs: setup
+  #   if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+  #   steps:
+  #     - name: Download repository
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: repository
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ env.PYTHON_VERSION }}
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Run data sampling
+  #       run: |
+  #         python src/pipelines/1-data_sampling/main.py \
+  #           --input_path data/01-raw/df_extendida_clean.parquet \
+  #           --output_path data/02-sampled/sampled_data.parquet \
+  #           --sample_size 2000 \
+  #           --random_state 42
+
+  #     - name: Upload sampled data
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: sampled-data
+  #         path: data/02-sampled/
+  #         retention-days: 1
+
+  # # ============================================================================
+  # # JOB 2: Feature Engineering
+  # # Depends on: data-sampling
+  # # ============================================================================
+  # feature-engineering:
+  #   name: Feature Engineering (Step 2/6)
+  #   runs-on: ubuntu-latest
+  #   needs: data-sampling
+  #   steps:
+  #     - name: Download repository
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: repository
+
+  #     - name: Download sampled data
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: sampled-data
+  #         path: data/02-sampled
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ env.PYTHON_VERSION }}
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Run feature engineering
+  #       run: |
+  #         python src/pipelines/2-feature_engineering/main.py \
+  #           --input_path data/02-sampled/sampled_data.parquet \
+  #           --output_path data/03-features/features.parquet \
+  #           --encoders_path models/label_encoders.pkl
+
+  #     - name: Upload features and encoders
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: features-and-encoders
+  #         path: |
+  #           data/03-features/
+  #           models/label_encoders.pkl
+  #         retention-days: 1
+
+  # # ============================================================================
+  # # JOB 3: Data Validation
+  # # Depends on: feature-engineering
+  # # ============================================================================
+  # data-validation:
+  #   name: Data Validation (Step 3/6)
+  #   runs-on: ubuntu-latest
+  #   needs: feature-engineering
+  #   steps:
+  #     - name: Download repository
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: repository
+
+  #     - name: Download features
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: features-and-encoders
+  #         path: .
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ env.PYTHON_VERSION }}
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Run data validation
+  #       run: |
+  #         python src/pipelines/data_validation/main.py \
+  #           --input_path data/03-features/features.parquet \
+  #           --output_path reports/data_validation.html
+
+  #     - name: Upload validation report
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: validation-report
+  #         path: reports/data_validation.html
+  #         retention-days: 30
+
+  # # ============================================================================
+  # # JOB 4: Model Training
+  # # Depends on: data-validation
+  # # ============================================================================
+  # model-training:
+  #   name: Model Training (Step 4/6)
+  #   runs-on: ubuntu-latest
+  #   needs: data-validation
+  #   steps:
+  #     - name: Download repository
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: repository
+
+  #     - name: Download features and encoders
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: features-and-encoders
+  #         path: .
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ env.PYTHON_VERSION }}
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Docker Setup - MLflow
+  #       run: |
+  #         docker pull ghcr.io/mlflow/mlflow:latest
+  #         docker run -d -p 5555:5000 --name mlflow-server \
+  #           ghcr.io/mlflow/mlflow:latest \
+  #           mlflow server --host 0.0.0.0 \
+  #           --backend-store-uri sqlite:///mlflow.db \
+  #           --default-artifact-root /tmp/mlruns
+
+  #     - name: Wait for MLflow to be ready
+  #       run: |
+  #         echo "Waiting for MLflow server..."
+  #         for i in {1..30}; do
+  #           if curl -f http://localhost:5555/health 2>/dev/null; then
+  #             echo "MLflow is ready!"
+  #             break
+  #           fi
+  #           echo "Attempt $i/30: MLflow not ready yet..."
+  #           sleep 2
+  #         done
+
+  #     - name: Run model training
+  #       env:
+  #         MLFLOW_TRACKING_URI: http://localhost:5555
+  #       run: |
+  #         python src/pipelines/3-training/main.py \
+  #           --input_path data/03-features/features.parquet \
+  #           --model_path models/dnn_model.pth \
+  #           --encoders_path models/label_encoders.pkl \
+  #           --config_path src/pipelines/3-training/config.yaml
+
+  #     - name: Clean up Docker
+  #       if: always()
+  #       run: |
+  #         docker stop mlflow-server || true
+  #         docker rm mlflow-server || true
+
+  #     - name: Upload trained model
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: trained-model
+  #         path: models/
+  #         retention-days: 1
+
+  # # ============================================================================
+  # # JOB 5: Model Evaluation
+  # # Depends on: model-training
+  # # ============================================================================
+  # model-evaluation:
+  #   name: Model Evaluation (Step 5/6)
+  #   runs-on: ubuntu-latest
+  #   needs: model-training
+  #   steps:
+  #     - name: Download repository
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: repository
+
+  #     - name: Download features
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: features-and-encoders
+  #         path: .
+
+  #     - name: Download model
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: trained-model
+  #         path: models
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ env.PYTHON_VERSION }}
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Run model evaluation
+  #       run: |
+  #         python src/pipelines/4-evaluation/main.py \
+  #           --model_path models/dnn_model.pth \
+  #           --data_path data/03-features/features.parquet \
+  #           --encoders_path models/label_encoders.pkl \
+  #           --output_path reports/metrics.json
+
+  #     - name: Upload evaluation metrics
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: evaluation-metrics
+  #         path: reports/metrics.json
+  #         retention-days: 30
+
+  # # ============================================================================
+  # # JOB 6: Model Registration
+  # # Depends on: model-evaluation
+  # # Only runs on version tags (v*.*.*)
+  # # ============================================================================
+  # model-registration:
+  #   name: Model Registration (Step 6/6)
+  #   runs-on: ubuntu-latest
+  #   needs: model-evaluation
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   steps:
+  #     - name: Download repository
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: repository
+
+  #     - name: Download model
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: trained-model
+  #         path: models
+
+  #     - name: Download metrics
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: evaluation-metrics
+  #         path: reports
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ env.PYTHON_VERSION }}
+
+  #     - name: Cache pip dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-
+
+  #     - name: Install dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements.txt
+
+  #     - name: Register model in MLflow
+  #       env:
+  #         GITHUB_SHA: ${{ github.sha }}
+  #         GITHUB_REF_NAME: ${{ github.ref_name }}
+  #       run: |
+  #         python src/pipelines/5-model_registration/main.py \
+  #           --model_path models/dnn_model.pth \
+  #           --encoders_path models/label_encoders.pkl \
+  #           --metrics_path reports/metrics.json \
+  #           --model_name recsys-v3-${{ github.ref_name }}
+
+  #     - name: Upload production artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: production-model-${{ github.ref_name }}
+  #         path: |
+  #           models/
+  #           reports/
+  #         retention-days: 90
+
+  # # ============================================================================
+  # # JOB 7: Cleanup
+  # # Always runs after pipeline completes
+  # # ============================================================================
+  # cleanup:
+  #   name: Cleanup Old Runs
+  #   needs: [setup, data-sampling, feature-engineering, data-validation, model-training, model-evaluation]
+  #   runs-on: ubuntu-latest
+  #   if: always()
+  #   steps:
+  #     - name: Cleanup old workflow runs
+  #       uses: Mattraks/delete-workflow-runs@v2
+  #       with:
+  #         token: ${{ github.token }}
+  #         repository: ${{ github.repository }}
+  #         retain_days: 30
+  #         keep_minimum_runs: 10
+
+  #     - name: Cleanup old artifacts
+  #       uses: c-hive/gha-remove-artifacts@v1
+  #       with:
+  #         age: '7 days'
+  #         skip-recent: 5
+
+  #     - name: Post cleanup summary
+  #       run: |
+  #         echo "### Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Removed workflow runs older than 30 days" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Removed artifacts older than 7 days" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Kept minimum of 10 recent runs" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Kept 5 most recent artifacts" >> $GITHUB_STEP_SUMMARY
+
+# ==============================================================================
+# AWS DEPLOYMENT CONFIGURATION (COMMENTED)
+# ==============================================================================
+# Uncomment and configure the jobs below for AWS SageMaker deployment
+#
+# Prerequisites:
+# 1. Configure AWS credentials as GitHub secrets:
+#    - AWS_ACCESS_KEY_ID
+#    - AWS_SECRET_ACCESS_KEY
+#    - AWS_REGION (e.g., us-east-1)
+#    - SAGEMAKER_EXECUTION_ROLE_ARN
+#    - S3_BUCKET_NAME
+#
+# 2. Create S3 bucket structure:
+#    s3://{bucket}/recsys-v3/
+#    ├── data/          # Training data
+#    ├── models/        # Model artifacts (.pth, .pkl)
+#    └── reports/       # Evaluation reports
+#
+# 3. Create SageMaker execution role with permissions:
+#    - S3 full access to your bucket
+#    - SageMaker full access
+#    - CloudWatch logs
+#    - ECR access (for custom containers)
+#
+# 4. Package model for SageMaker (create tar.gz):
+#    - dnn_model.pth
+#    - label_encoders.pkl
+#    - feature_columns.pkl
+#    - location_filter.pkl
+#    - inference.py (SageMaker handler)
+#
+# ==============================================================================
+#
+#  deploy-to-s3:
+#    name: Deploy Artifacts to S3
+#    runs-on: ubuntu-latest
+#    needs: model-registration
+#    if: startsWith(github.ref, 'refs/tags/v')
+#    steps:
+#      - name: Download production model
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: production-model-${{ github.ref_name }}
+#          path: ./artifacts
+#
+#      - name: Package model for SageMaker
+#        run: |
+#          cd artifacts/models
+#          tar -czf ../model.tar.gz *
+#          cd ../..
+#
+#      - name: Configure AWS credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          aws-region: ${{ secrets.AWS_REGION }}
+#
+#      - name: Upload model to S3
+#        run: |
+#          aws s3 cp artifacts/model.tar.gz \
+#            s3://${{ secrets.S3_BUCKET_NAME }}/recsys-v3/models/${{ github.ref_name }}/model.tar.gz
+#
+#      - name: Upload reports to S3
+#        run: |
+#          aws s3 cp artifacts/reports/ \
+#            s3://${{ secrets.S3_BUCKET_NAME }}/recsys-v3/reports/${{ github.ref_name }}/ \
+#            --recursive
+#
+#  deploy-sagemaker-endpoint:
+#    name: Deploy to SageMaker
+#    runs-on: ubuntu-latest
+#    needs: deploy-to-s3
+#    if: startsWith(github.ref, 'refs/tags/v')
+#    steps:
+#      - name: Configure AWS credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          aws-region: ${{ secrets.AWS_REGION }}
+#
+#      - name: Create SageMaker model
+#        run: |
+#          MODEL_NAME="recsys-v3-${{ github.ref_name }}"
+#          S3_MODEL_URI="s3://${{ secrets.S3_BUCKET_NAME }}/recsys-v3/models/${{ github.ref_name }}/model.tar.gz"
+#
+#          # PyTorch inference container (adjust version as needed)
+#          IMAGE_URI="763104351884.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pytorch-inference:2.1.0-cpu-py310"
+#
+#          aws sagemaker create-model \
+#            --model-name $MODEL_NAME \
+#            --primary-container Image=$IMAGE_URI,ModelDataUrl=$S3_MODEL_URI \
+#            --execution-role-arn ${{ secrets.SAGEMAKER_EXECUTION_ROLE_ARN }}
+#
+#      - name: Create endpoint configuration
+#        run: |
+#          ENDPOINT_CONFIG_NAME="recsys-v3-config-${{ github.ref_name }}"
+#          MODEL_NAME="recsys-v3-${{ github.ref_name }}"
+#
+#          aws sagemaker create-endpoint-config \
+#            --endpoint-config-name $ENDPOINT_CONFIG_NAME \
+#            --production-variants \
+#              VariantName=AllTraffic,\
+#ModelName=$MODEL_NAME,\
+#InitialInstanceCount=1,\
+#InstanceType=ml.m5.large,\
+#InitialVariantWeight=1
+#
+#      - name: Create or update endpoint
+#        run: |
+#          ENDPOINT_NAME="recsys-v3-endpoint"
+#          ENDPOINT_CONFIG_NAME="recsys-v3-config-${{ github.ref_name }}"
+#
+#          # Check if endpoint exists
+#          if aws sagemaker describe-endpoint --endpoint-name $ENDPOINT_NAME 2>/dev/null; then
+#            echo "Updating existing endpoint..."
+#            aws sagemaker update-endpoint \
+#              --endpoint-name $ENDPOINT_NAME \
+#              --endpoint-config-name $ENDPOINT_CONFIG_NAME
+#          else
+#            echo "Creating new endpoint..."
+#            aws sagemaker create-endpoint \
+#              --endpoint-name $ENDPOINT_NAME \
+#              --endpoint-config-name $ENDPOINT_CONFIG_NAME
+#          fi
+#
+#      - name: Wait for endpoint deployment
+#        run: |
+#          ENDPOINT_NAME="recsys-v3-endpoint"
+#          echo "Waiting for endpoint to be in service..."
+#          aws sagemaker wait endpoint-in-service --endpoint-name $ENDPOINT_NAME
+#          echo "Endpoint deployed successfully!"
+#
+#      - name: Test endpoint
+#        run: |
+#          ENDPOINT_NAME="recsys-v3-endpoint"
+#
+#          # Test payload for recommendations
+#          cat > test_payload.json <<EOF
+#          {
+#            "id_persona": 12345,
+#            "ciudad": "Quito",
+#            "hora": 14,
+#            "k": 5
+#          }
+#          EOF
+#
+#          aws sagemaker-runtime invoke-endpoint \
+#            --endpoint-name $ENDPOINT_NAME \
+#            --content-type application/json \
+#            --body file://test_payload.json \
+#            response.json
+#
+#          echo "Endpoint response:"
+#          cat response.json | jq '.'
+#
+# ==============================================================================
+# ALTERNATIVE: AWS Lambda + API Gateway (Serverless, Lower Cost)
+# ==============================================================================
+# For event-driven, lower-cost deployments with auto-scaling:
+#
+#  deploy-lambda:
+#    name: Deploy to AWS Lambda
+#    runs-on: ubuntu-latest
+#    needs: model-registration
+#    if: startsWith(github.ref, 'refs/tags/v')
+#    steps:
+#      - uses: actions/checkout@v4
+#
+#      - name: Download production model
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: production-model-${{ github.ref_name }}
+#          path: ./artifacts
+#
+#      - name: Configure AWS credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          aws-region: ${{ secrets.AWS_REGION }}
+#
+#      - name: Build Lambda deployment package
+#        run: |
+#          # Install dependencies in lambda-layer
+#          mkdir -p lambda-layer/python
+#          pip install -r requirements.txt -t lambda-layer/python/ --platform manylinux2014_x86_64 --only-binary=:all:
+#          cd lambda-layer && zip -r ../lambda-layer.zip . && cd ..
+#
+#          # Create function package
+#          mkdir -p lambda-function
+#          cp -r artifacts/models lambda-function/
+#          cp entrypoint/lambda_handler.py lambda-function/
+#          cd lambda-function && zip -r ../lambda-function.zip . && cd ..
+#
+#      - name: Upload model artifacts to S3
+#        run: |
+#          aws s3 cp artifacts/models/ \
+#            s3://${{ secrets.S3_BUCKET_NAME }}/recsys-v3/lambda/models/${{ github.ref_name }}/ \
+#            --recursive
+#
+#      - name: Publish Lambda layer
+#        run: |
+#          LAYER_ARN=$(aws lambda publish-layer-version \
+#            --layer-name recsys-v3-dependencies-${{ github.ref_name }} \
+#            --zip-file fileb://lambda-layer.zip \
+#            --compatible-runtimes python3.11 \
+#            --query 'LayerVersionArn' \
+#            --output text)
+#          echo "LAYER_ARN=$LAYER_ARN" >> $GITHUB_ENV
+#
+#      - name: Deploy Lambda function
+#        run: |
+#          FUNCTION_NAME="recsys-v3-api"
+#
+#          if aws lambda get-function --function-name $FUNCTION_NAME 2>/dev/null; then
+#            echo "Updating existing function..."
+#            aws lambda update-function-code \
+#              --function-name $FUNCTION_NAME \
+#              --zip-file fileb://lambda-function.zip
+#
+#            aws lambda update-function-configuration \
+#              --function-name $FUNCTION_NAME \
+#              --layers ${{ env.LAYER_ARN }} \
+#              --environment Variables="{MODEL_VERSION=${{ github.ref_name }},S3_BUCKET=${{ secrets.S3_BUCKET_NAME }}}"
+#          else
+#            echo "Creating new function..."
+#            aws lambda create-function \
+#              --function-name $FUNCTION_NAME \
+#              --runtime python3.11 \
+#              --role ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }} \
+#              --handler lambda_handler.handler \
+#              --zip-file fileb://lambda-function.zip \
+#              --layers ${{ env.LAYER_ARN }} \
+#              --memory-size 3008 \
+#              --timeout 30 \
+#              --environment Variables="{MODEL_VERSION=${{ github.ref_name }},S3_BUCKET=${{ secrets.S3_BUCKET_NAME }}}"
+#          fi
+#
+#      - name: Configure API Gateway (if not exists)
+#        run: |
+#          # Check if API exists
+#          API_ID=$(aws apigatewayv2 get-apis \
+#            --query "Items[?Name=='recsys-v3-api'].ApiId" \
+#            --output text)
+#
+#          if [ -z "$API_ID" ]; then
+#            echo "Creating API Gateway..."
+#            API_ID=$(aws apigatewayv2 create-api \
+#              --name recsys-v3-api \
+#              --protocol-type HTTP \
+#              --target arn:aws:lambda:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:function:recsys-v3-api \
+#              --query 'ApiId' \
+#              --output text)
+#
+#            # Grant API Gateway permission to invoke Lambda
+#            aws lambda add-permission \
+#              --function-name recsys-v3-api \
+#              --statement-id apigateway-invoke \
+#              --action lambda:InvokeFunction \
+#              --principal apigateway.amazonaws.com \
+#              --source-arn "arn:aws:execute-api:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:$API_ID/*/*"
+#
+#            echo "API Gateway created: https://$API_ID.execute-api.${{ secrets.AWS_REGION }}.amazonaws.com"
+#          else
+#            echo "API Gateway already exists: $API_ID"
+#          fi

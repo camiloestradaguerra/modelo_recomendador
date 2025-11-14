@@ -1,0 +1,131 @@
+================================================================================
+QUICK REFERENCE: 03_Modelling_diners_FineTuning.ipynb ANALYSIS
+================================================================================
+
+1. MODEL TYPE
+   - Deep Neural Network (DNN) Multi-class Classifier
+   - Hybrid: Content-Based + Collaborative Filtering
+   - 3-layer dense network with BatchNorm, ReLU, Dropout
+
+2. INPUT FEATURES (40+)
+   TEMPORAL (13): hora, dia_semana, mes, dia_mes, es_fin_semana,
+                   hora_sin, hora_cos, dia_semana_sin, dia_semana_cos,
+                   mes_sin, mes_cos, franja_horaria_encoded
+   LOCATION (4):  ciudad_encoded, zona_encoded, region_encoded,
+                   hora_ciudad_interaction
+   USER (8):      edad, antiguedad_socio_unico, antiguedad_normalizada,
+                   genero, estado_civil, rol, segmento_comercial, grupo_edad
+   SPENDING (8):  log_monto, monto_squared, avg/std/min/max spending,
+                   spending_deviation, spending_ratio
+   INTERACTION(7): user_establishment_freq, user_specialty_freq,
+                   user_city_freq, establishment_avg_ticket,
+                   establishment_popularity
+
+3. TRAINING FLOW
+   Load (7.5M) → Clean & Filter (7.4M) → Feature Engineer (40+ features)
+   → Train/Val/Test Split (70/15/15) → Bayesian HP Tuning
+   → Train DNN (PyTorch) → Evaluate → Save Model
+
+4. LIBRARIES
+   ML: PyTorch, scikit-learn (LabelEncoder, train_test_split, ndcg_score)
+   HP Tuning: Weights & Biases (Bayesian optimization)
+   Data: Pandas, NumPy
+   Viz: Matplotlib, Seaborn
+   Other: skimpy (column cleaning)
+
+5. KEY FINDINGS
+
+   TIME (HORA): YES - WELL IMPLEMENTED
+   ✓ hora (raw hour) - YES
+   ✓ Cyclical encoding (sin/cos) - YES
+   ✓ 4-band categorization - YES
+   ✓ Multiple temporal features - YES
+   Status: HIGH QUALITY
+
+   LOCATION (CIUDAD): YES - BUT WEAKLY ENFORCED
+   ✓ ciudad_encoded - YES
+   ✓ zona_encoded, region_encoded - YES
+   ✓ hora_ciudad_interaction - YES (weak)
+   ✗ No geographic filtering
+   ✗ No distance/proximity logic
+   ✗ No business hours checking
+   Status: MODERATE - FEATURES INCLUDED, CONSTRAINTS MISSING
+
+6. THE CRITICAL GAP
+
+   WHAT MODEL DOES:
+   - Learn: Users in City X at Time Y prefer Establishment Type Z
+   - Compute: P(establishment | all features)
+   - Rank: Establishments by probability
+   - Return: Top-k by probability
+
+   WHAT MODEL DOES NOT:
+   - Filter: "Only establishments in user's city"
+   - Check: "Is this open at this hour?"
+   - Consider: "How far is this establishment?"
+   - Apply: Hard geographic constraints
+
+   ROOT CAUSE:
+   Location & time treated as PREDICTIVE FEATURES, not BUSINESS CONSTRAINTS
+
+   EXAMPLE:
+   Input: User in Quito, Time 8PM
+   Possible Output:
+     1. Restaurant A (45%) - Actually in Guayaquil
+     2. Restaurant B (38%) - In Quito
+     3. Restaurant C (35%) - In Ambato
+   
+   Why? Model learned Restaurant A is popular at 8PM,
+   but didn't filter by user's location.
+
+7. QUICK FIX
+
+   Add post-processing layer:
+   
+   def recommend_with_constraints(probs, establishments, ciudad, hora):
+       # Filter: Same city only
+       filtered = [est for est in establishments if est.ciudad == ciudad]
+       
+       # Filter: Open at this hour
+       filtered = [est for est in filtered if est.is_open(hora)]
+       
+       # Rank: By model probability
+       ranked = sorted(filtered, key=lambda x: probs[x], reverse=True)
+       
+       return ranked[:k]
+
+8. FILES GENERATED
+   - NOTEBOOK_ANALYSIS_REPORT.md (comprehensive analysis)
+   - QUICK_REFERENCE.txt (this file)
+
+9. ANSWER TO USER'S QUESTION
+
+   "Does the model consider location (ciudad) and time (hora)?"
+
+   OFFICIAL ANSWER:
+   
+   YES - Time (HORA) is considered thoroughly:
+   - Well-engineered temporal features
+   - Cyclical encoding for periodicity
+   - Model learns hour-based patterns
+   
+   YES - Location (CIUDAD) is considered but NOT enforced:
+   - Included as features for prediction
+   - Does NOT filter recommendations by city
+   - Can recommend establishments outside user's location
+   - Geographic interaction is weak (simple multiplication)
+
+   BOTTOM LINE:
+   Features YES, Constraints NO.
+   Model learns location patterns but doesn't enforce
+   that recommendations must be in the user's location.
+
+10. RECOMMENDATION
+
+    Immediately add geographic filtering to prevent
+    recommending establishments outside the user's city.
+    This requires NO model retraining - just add a
+    post-processing layer.
+
+================================================================================
+For detailed analysis, see: NOTEBOOK_ANALYSIS_REPORT.md

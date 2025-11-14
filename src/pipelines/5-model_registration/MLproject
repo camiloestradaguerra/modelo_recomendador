@@ -1,0 +1,20 @@
+name: model_registration
+
+entry_points:
+  main:
+    parameters:
+      model_path:
+        type: str
+      encoders_path:
+        type: str
+      metrics_path:
+        type: str
+      model_name:
+        type: str
+        default: recsys_dnn
+
+    command: >
+      python main.py --model_path {model_path} \
+                     --encoders_path {encoders_path} \
+                     --metrics_path {metrics_path} \
+                     --model_name {model_name}

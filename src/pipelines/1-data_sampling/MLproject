@@ -1,0 +1,25 @@
+name: data_sampling
+
+entry_points:
+  main:
+    parameters:
+      input_path:
+        description: Path to the input parquet file
+        type: str
+      output_path:
+        description: Path where sampled data will be saved
+        type: str
+      sample_size:
+        description: Number of records to sample
+        type: int
+        default: 2000
+      random_state:
+        description: Random state for reproducibility
+        type: int
+        default: 42
+
+    command: >
+      python main.py --input_path {input_path} \
+                     --output_path {output_path} \
+                     --sample_size {sample_size} \
+                     --random_state {random_state}

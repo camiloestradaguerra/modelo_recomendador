@@ -1,0 +1,247 @@
+================================================================================
+CODE LOCATIONS IN NOTEBOOK: 03_Modelling_diners_FineTuning.ipynb
+================================================================================
+
+SECTION 1: LIBRARIES & IMPORTS
+Location: Cell 2
+What: All imports including PyTorch, pandas, sklearn, wandb, matplotlib, seaborn
+
+SECTION 2: DATA LOADING
+Location: Cell 3
+Code: df = pd.read_parquet('/content/drive/MyDrive/RecSys/data/processed/df_extendida_clean.parquet')
+Result: 7,527,130 rows loaded
+
+SECTION 3: TEXT NORMALIZATION
+Location: Cell 7
+Code: df['ciudad'] = df['ciudad'].str.strip().str.title()
+Applied to: especialidad, localizacion_externa, estado_civil, genero, 
+           segmento_comercial, ciudad, zona, region, cadena, establecimiento
+
+SECTION 4: DATA QUALITY - OUTLIER REMOVAL
+Location: Cells 9-11
+Code: df = df[df['antiguedad_socio_unico']<df['antiguedad_socio_unico'].quantile(0.99)]
+Removed: 75,494 rows (1%)
+
+SECTION 5: DATA QUALITY - CITY FILTERING
+Location: Cells 13-21
+Code: ciudades_con_alta_antiguedad_df = df_by_city[df_by_city['antiguedad_socio_unico'] > 25]
+Keep: Only cities with >= 25 records
+
+SECTION 6: DATA QUALITY - CHAIN FILTERING
+Location: Cells 23-28
+Code: filtro_cadena = df_frec_cadena[df_frec_cadena['count'] < 7]['cadena'].unique()
+Keep: Only chains with >= 7 records
+
+SECTION 7: DATA QUALITY - ESTABLISHMENT FILTERING
+Location: Cells 30-34
+Code: filtro_establecimiento = df_establecimiento[df_establecimiento['count'] < 7]
+Keep: Only establishments with >= 7 records
+Result: 7.4M rows
+
+SECTION 8: FEATURE ENGINEERING CLASS
+Location: Cell 49
+Class: FeatureEngineer
+
+  Sub-method 1: create_temporal_features()
+    - Extract hora from hora_inicio
+    - Create cyclical encodings (sin/cos)
+    - Define time slots (franja_horaria)
+    - Key code:
+      df['hora'] = df['hora_inicio'].dt.hour
+      df['hora_sin'] = np.sin(2 * np.pi * df['hora'] / 24)
+      df['hora_ciudad_interaction'] = df['hora'] * df['ciudad'].astype('category').cat.codes
+      *** THIS WEAK INTERACTION IS THE PROBLEM ***
+
+  Sub-method 2: create_user_features()
+    - Log transform spending
+    - Bin age into groups
+    - Normalize seniority
+
+  Sub-method 3: create_interaction_features()
+    - User-establishment frequency
+    - User-specialty frequency
+    - User-city frequency
+    - Spending statistics aggregation
+
+  Sub-method 4: fit_transform()
+    - Apply all three methods
+    - LabelEncode categorical features
+    - Encode establishments (target)
+
+SECTION 9: MODEL ARCHITECTURE
+Location: Cell 49 (continued)
+Class: EstablishmentRecommender
+
+Architecture:
+  - Input: 40+ features
+  - Hidden layer 1: BatchNorm → ReLU → Dropout
+  - Hidden layer 2: BatchNorm → ReLU → Dropout
+  - Hidden layer 3: BatchNorm → ReLU → Dropout
+  - Output: num_establishments (logits)
+
+Loss Function: CrossEntropyLoss()
+No geographic constraints in architecture!
+
+SECTION 10: EVALUATION METRICS
+Location: Cell 49 (continued)
+Functions:
+  - recall_at_k()
+  - ndcg_at_k()
+  - mean_reciprocal_rank()
+  - precision_at_k()
+  - calculate_all_metrics()
+
+SECTION 11: TRAINING LOOP
+Location: Cell 50
+Function: train_epoch()
+  - Forward pass: features → model → logits → loss
+  - Backward pass: compute gradients
+  - Optimizer step: update weights
+
+Function: evaluate()
+  - Forward pass on validation/test set
+  - Compute softmax probabilities
+  - Calculate metrics
+
+SECTION 12: HYPERPARAMETER OPTIMIZATION
+Location: Cell 51-52
+Function: bayesian_optimization_wandb()
+  - Define sweep_config with parameter space
+  - Use W&B Bayesian optimization
+  - Track metric: val_recall_at_3
+  - Max sweeps: 30 trials
+
+Hyperparameter Space:
+  learning_rate: [1e-5, 1e-2]
+  batch_size: [32, 64, 128, 256]
+  hidden_dim1: [128, 256, 512, 1024]
+  hidden_dim2: [64, 128, 256, 512]
+  hidden_dim3: [32, 64, 128, 256]
+  dropout_rate: [0.1, 0.5]
+  weight_decay: [1e-6, 1e-3]
+
+SECTION 13: FEATURE COLUMNS DEFINITION
+Location: Cell 55
+Variable: feature_cols = [...]
+
+Contains 40+ features grouped into:
+  - Temporal: hora, dia_semana, mes, hora_sin, hora_cos, ...
+  - Location: ciudad_encoded, zona_encoded, region_encoded, hora_ciudad_interaction
+  - User: edad, genero, estado_civil, ...
+  - Spending: log_monto, monto_squared, user_avg_spending, ...
+  - Interaction: user_establishment_freq, user_specialty_freq, user_city_freq, ...
+
+*** LOCATION FEATURES ARE INCLUDED HERE ***
+*** BUT NO FILTERING CONSTRAINTS ARE APPLIED LATER ***
+
+SECTION 14: DATA SPLITTING
+Location: Cell 56
+Code:
+  X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, stratify=y)
+  X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5)
+
+Split: 70% train, 15% val, 15% test
+Stratified by: establishment class
+
+SECTION 15: FINAL MODEL TRAINING
+Location: Cell 59
+Process:
+  1. Call bayesian_optimization_wandb() → get best_config
+  2. Initialize final_model with best_config
+  3. Create DataLoaders for train/val/test
+  4. Training loop with early stopping
+  5. Save best model checkpoint
+
+SECTION 16: EVALUATION
+Location: Cell 60
+Process:
+  1. evaluate() on test set
+  2. get_feature_importance() via permutation
+  3. Generate visualizations (6 subplots)
+  4. Print top 20 features
+
+SECTION 17: PREDICTION FUNCTION - THE CRITICAL CODE
+Location: Cell 54 (but used in Cell 61)
+Function: predict_top_k_establishments()
+
+Key Lines:
+  input_df = pd.DataFrame([{
+      'id_persona': id_persona,
+      'hora_inicio': hora_dt,
+      'ciudad': ciudad,  # LOCATION PROVIDED HERE
+      # ... other features ...
+  }])
+  
+  input_processed = feature_engineer.transform(input_df)
+  # Features created with the provided ciudad
+  
+  X_input = input_processed[feature_cols].values
+  
+  with torch.no_grad():
+      X_tensor = torch.FloatTensor(X_input).to(device)
+      outputs = model(X_tensor)
+      probs = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+  
+  # TOP-K SELECTION - NO GEOGRAPHIC FILTERING
+  top_k_indices = np.argsort(probs)[-k:][::-1]  # Sort by probability only
+  top_k_probs = probs[top_k_indices]
+  
+  # Return establishments ranked by probability
+  # NO CHECK: are they in the provided ciudad?
+  # NO CHECK: are they open at this hour?
+
+*** THIS IS WHERE THE BUG IS - No filtering by location ***
+
+SECTION 18: EXAMPLE PREDICTION
+Location: Cell 61
+Example:
+  ejemplo_id_persona = df_original['id_persona'].iloc[0]
+  ejemplo_hora = 20  # 8 PM
+  ejemplo_ciudad = 'Quito'  # Provides expected city
+  
+  recomendaciones = predict_top_k_establishments(
+      model=final_model,
+      feature_engineer=feature_engineer,
+      id_persona=ejemplo_id_persona,
+      hora_compra=ejemplo_hora,
+      ciudad=ejemplo_ciudad,  # BUT NOT USED FOR FILTERING!
+      # ...
+      k=3
+  )
+
+Output might include restaurants from Guayaquil, Ambato, etc.
+
+SECTION 19: MODEL PERSISTENCE
+Location: Cell 62
+Saves:
+  - best_model.pth: Model state dict
+  - final_model_complete.pth: Full checkpoint
+  - feature_engineer.pkl: Transformer
+  - best_config.json: Hyperparameters
+
+SECTION 20: ALTERNATIVE IMPLEMENTATIONS
+Location: Cells 63-66
+Multiple corrected versions of FeatureEngineer
+showing attempts to fix data leakage issues
+(not the main issue of missing geographic filtering)
+
+================================================================================
+SUMMARY OF KEY CODE ISSUES
+
+1. TEMPORAL FEATURES: WELL DONE
+   Location: Cell 49, create_temporal_features()
+   Quality: High - cyclical encoding, multiple features
+
+2. LOCATION FEATURES: INCLUDED BUT NOT ENFORCED
+   Location: Cell 49, create_interaction_features()
+   Issues:
+   - hora_ciudad_interaction = hora * ciudad.cat.codes (too simple)
+   - No distance calculation
+   - No geographic constraints
+
+3. PREDICTION WITHOUT FILTERING: THE MAIN PROBLEM
+   Location: Cell 54, predict_top_k_establishments()
+   Issue: No check that recommendations are in user's ciudad
+   Fix: Add location filtering after probability ranking
+
+================================================================================

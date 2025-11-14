@@ -1,0 +1,19 @@
+name: feature_engineering
+
+entry_points:
+  main:
+    parameters:
+      input_path:
+        description: Path to the sampled parquet file
+        type: str
+      output_path:
+        description: Path where engineered features will be saved
+        type: str
+      encoders_path:
+        description: Path where label encoders will be saved
+        type: str
+
+    command: >
+      python main.py --input_path {input_path} \
+                     --output_path {output_path} \
+                     --encoders_path {encoders_path}
