@@ -49,7 +49,14 @@ jobs:
             echo "✅ Credenciales AWS presentes en el entorno del pipeline"
           fi
 
-       # -----------------------------------------------------
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install boto3 s3fs pandas pyarrow fastparquet
+
+      
+      
+      # -----------------------------------------------------
       # 5. Run your script (IMPORTANT)
       # -----------------------------------------------------
       - name: Ejecutar pipeline S3 (s3_con.py)
