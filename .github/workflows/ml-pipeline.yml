@@ -43,16 +43,18 @@ jobs:
       - name: Verificar credenciales cargadas
         run: |
           if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$AWS_DEFAULT_REGION" ]; then
-            echo "❌ ERROR: Falta una o más variables de credenciales AWS"
+            echo "ERROR: Falta una o más variables de credenciales AWS"
             exit 1
           else
-            echo "✅ Credenciales AWS presentes en el entorno del pipeline"
+            echo "Credenciales AWS presentes en el entorno del pipeline"
           fi
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install boto3 s3fs pandas pyarrow fastparquet
+          pip install --upgrade "s3fs>=2024.3.0" "fsspec>=2024.3.0"
+          pip install pandas pyarrow fastparquet boto3
+
 
       
       
@@ -63,6 +65,8 @@ jobs:
         run: |
           echo "▶️ Iniciando ejecución del script..."
           python src/pipelines/1-data_sampling/s3_con.py
+          echo "El script finalizó correctamente"
+
 
       # -----------------------------------------------------
       # 6. Success message
@@ -70,7 +74,7 @@ jobs:
       - name: Confirmar ejecución exitosa
         if: success()
         run: |
-          echo "🎉 El script s3_con.py se ejecutó correctamente y los archivos fueron subidos a S3."
+          echo "El script s3_con.py se ejecutó correctamente y los archivos fueron subidos a S3."
 
   #     - name: Cache pip dependencies
   #       uses: actions/cache@v4
