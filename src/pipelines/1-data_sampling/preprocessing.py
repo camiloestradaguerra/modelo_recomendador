@@ -257,14 +257,11 @@ class DataPreprocessingPipeline:
 #     print(f"Columnas: {list(data_extendida_clean_outliers.columns)}")
 #     print(data_extendida_clean_outliers.head(5))
 if __name__ == "__main__":
-    df = pd.read_parquet("data_extendida_clean.parquet")
     pipeline = DataPreprocessingPipeline()
-    data_extendida = pipeline.data_extended()
+    data_extendida = pd.read_parquet("data_extendida_clean.parquet")
     data_extendida_clean = pipeline.clean_recent_text_columns(data_extendida)
     data_extendida_clean_outliers = pipeline.outliers_filters(data_extendida_clean)
     data_extendida_clean_outliers_normalizada = pipeline.normalization_establecimientos(data_extendida_clean_outliers)
-    # Normalización
-    #data_extendida_clean_outliers_normalizada = pipeline.normalization_establecimientos(data_extendida_clean_outliers)
     
     # Guardado en S3
     pipeline.save_bucket_data(
