@@ -214,26 +214,34 @@ class DataPreprocessingPipeline:
 
         return data_extendida_clean
     
-    def save_bucket_data(self, path_destino, nombre_archivo, df):
+    def save_bucket_data(self, path_destino: str, nombre_archivo: str, df: pd.DataFrame):
         """Guarda un DataFrame como parquet en el bucket destino con timestamp."""
-
-        # ===== NUEVA LÓGICA =====
+        # ===== Generar timestamp =====
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Dividir nombre y extensión
         base, ext = nombre_archivo.split(".")
         nombre_archivo_timestamp = f"{base}_{timestamp}.{ext}"
-        # =========================
 
-        ruta_relativa = f"{path_destino}{nombre_archivo_timestamp}"
-        ruta_s3_destino = f"s3://{self.bucket_name}/{ruta_relativa}"
+        # URI completo en S3
+        ruta_s3_destino = f"s3://{self.bucket_name}/{path_destino}{nombre_archivo_timestamp}"
+
+        print(f"Guardando archivo procesado en: {ruta_s3_destino}")
 
         try:
-            with self.fs.open(ruta_s3_destino, 'wb') as f:
-                df.to_parquet(f, index=False)
-            print(f"Archivo guardado correctamente en: {ruta_s3_destino}")
+            df.to_parquet(
+                ruta_s3_destino,
+                engine='pyarrow',
+                index=False,
+                storage_options={
+                    'key': self.aws_access_key,
+                    'secret': self.aws_secret_key
+                }
+            )
+            print("Archivo cargado exitosamente en S3.")
         except Exception as e:
             print(f"Error al guardar en S3: {e}")
+
 
 # ---------------------------------------------------------
 # Bloque de prueba
@@ -256,7 +264,7 @@ if __name__ == "__main__":
     
     # Guardado en S3
     pipeline.save_bucket_data(
-        path_destino=pipeline.file_procesed_path,  # solo el path relativo dentro del bucket
+        path_destino=pipeline.file_procesed_path,
         nombre_archivo="data_extendida_ensayo.parquet",
         df=data_extendida
     )
