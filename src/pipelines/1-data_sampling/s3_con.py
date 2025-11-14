@@ -604,9 +604,10 @@ if __name__ == "__main__":
     df_extendida1 = pipeline.clean_recent_text_columns(df_extendida)
     df_extendida2 = pipeline.outliers_filters(df_extendida1)
     df_extendida3 = pipeline.normalization_establecimientos(df_extendida2)
-    
+
     print(df_extendida3.head(4))
 
+    s3.save_dataframe_to_s3(df=df_extendida3, bucket=BUCKET_DEST, path_destino=DESTINO_PROCESSED, nombre_archivo='df_extendida_clean.parquet')
  # # ------------------------------------------------------------
     # # Guardar el DataFrame extendido limpio en S3
     # # ------------------------------------------------------------
