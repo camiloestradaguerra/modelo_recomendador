@@ -226,7 +226,7 @@ class DataPreprocessingPipeline:
         # =========================
 
         ruta_relativa = f"{path_destino}{nombre_archivo_timestamp}"
-        ruta_s3_destino = f"s3://{self.bucket_dest}/{ruta_relativa}"
+        ruta_s3_destino = f"s3://{self.bucket_name}/{ruta_relativa}"
 
         try:
             with self.fs.open(ruta_s3_destino, 'wb') as f:
