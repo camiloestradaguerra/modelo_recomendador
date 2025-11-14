@@ -1,61 +1,91 @@
 import os
+import re
+import sys
 import boto3
 import pandas as pd
 import s3fs
 from datetime import datetime
+from loguru import logger
+from pathlib import Path
+from dotenv import load_dotenv
 
 
+# ------------------------------------------------------------
+#                  CONFIGURACIÓN DEL LOGGER
+# ------------------------------------------------------------
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | <level>{message}</level>",
+    level="INFO"
+)
+log_path = Path("logs/pipeline.log")
+log_path.parent.mkdir(parents=True, exist_ok=True)
+logger.add(
+    log_path,
+    rotation="1 day",
+    retention="7 days",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {message}",
+    level="INFO",
+    enqueue=True
+)
+
+# ------------------------------------------------------------
+#                    S3 DATA MANAGER
+# ------------------------------------------------------------
 class S3DataManager:
-    def __init__(self, bucket_source, bucket_dest):
-        self.bucket_source = bucket_source
-        self.bucket_dest = bucket_dest
+    def __init__(self):
         self.fs = None
         self._load_env_credentials()
         self._init_s3()
 
     def _load_env_credentials(self):
-        """Carga las credenciales de AWS desde variables de entorno."""
-        
-        self.aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-        self.aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-        self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
+        """Carga credenciales AWS desde .env o sistema."""
+        load_dotenv()
+        self.aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
+        self.aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+        self.aws_region = os.getenv('AWS_DEFAULT_REGION')
 
         if not all([self.aws_access_key, self.aws_secret_key, self.aws_region]):
-            raise ValueError(
-                "Faltan variables de entorno de AWS. "
-                "Asegúrate de que AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY y AWS_DEFAULT_REGION "
-                "están configuradas en GitHub Actions."
-            )
+            raise ValueError("Faltan variables de entorno AWS (.env o sistema).")
+
+        logger.info("Credenciales AWS cargadas correctamente.")
 
     def _init_s3(self):
-        """Inicializa cliente y sistema de archivos S3."""
+        """Inicializa cliente boto3 y S3FileSystem."""
         boto3.client(
             's3',
             aws_access_key_id=self.aws_access_key,
             aws_secret_access_key=self.aws_secret_key,
             region_name=self.aws_region
         )
-
         self.fs = s3fs.S3FileSystem(
             key=self.aws_access_key,
             secret=self.aws_secret_key,
             client_kwargs={'region_name': self.aws_region}
         )
+        logger.info("Conexión S3 inicializada correctamente.")
 
-    def concat_files(self, type, year, month, day):
-        """Concatena todos los archivos Parquet de una carpeta S3 leyendo uno por uno"""
-        prefix = f'source=teradata/type={type}/year={year}/month={month}/day={day}/'
-        path_s3 = f'{self.bucket_source}/{prefix}'
-
+    def load_dataframe_from_s3(self, bucket: str, prefix: str, limit: int = None) -> pd.DataFrame:
+        """Carga y concatena archivos Parquet desde S3 con un prefijo."""
+        path_s3 = f"{bucket}/{prefix}"
+        
         parquet_files = [
-            f's3://{file}' 
-            for file in self.fs.ls(path_s3) 
+            f"s3://{file}"
+            for file in self.fs.ls(path_s3)
             if file.endswith('.parquet')
         ]
-        print(f" Archivos encontrados para '{type}': {len(parquet_files)}")
+
+        logger.info(f"Archivos encontrados en {prefix}: {len(parquet_files)}")
+
+        if not parquet_files:
+            logger.warning(f"No hay archivos parquet en {prefix}.")
+            return pd.DataFrame()
 
         df_list = []
-        for file in parquet_files[:1]:
+        for i, file in enumerate(parquet_files[0:2]):
+            if limit and i >= limit:
+                break
             df = pd.read_parquet(
                 file,
                 storage_options={
@@ -66,55 +96,184 @@ class S3DataManager:
             df_list.append(df)
 
         df_concat = pd.concat(df_list, ignore_index=True)
-        print(f" Registros concatenados: {df_concat.shape[0]}")
+        logger.info(f"Registros concatenados: {df_concat.shape[0]}")
 
         return df_concat
 
-    def save_bucket_data(self, path_destino, nombre_archivo, df):
-        """Guarda un DataFrame como parquet en el bucket destino con timestamp."""
-
-        # ===== NUEVA LÓGICA =====
+    def save_dataframe_to_s3(self, df: pd.DataFrame, bucket: str, path_destino: str, nombre_archivo: str):
+        """Guarda un DataFrame en S3 con timestamp."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Dividir nombre y extensión
         base, ext = nombre_archivo.split(".")
         nombre_archivo_timestamp = f"{base}_{timestamp}.{ext}"
-        # =========================
 
-        ruta_relativa = f"{path_destino}{nombre_archivo_timestamp}"
-        ruta_s3_destino = f"s3://{self.bucket_dest}/{ruta_relativa}"
+        ruta_s3_destino = f"s3://{bucket}/{path_destino}{nombre_archivo_timestamp}"
 
         try:
             with self.fs.open(ruta_s3_destino, 'wb') as f:
                 df.to_parquet(f, index=False)
-            print(f"Archivo guardado correctamente en: {ruta_s3_destino}")
+            logger.success(f"Archivo guardado correctamente: {ruta_s3_destino}")
         except Exception as e:
-            print(f"Error al guardar en S3: {e}")
+            logger.error(f"Error guardando en S3: {e}")
+            raise
+    
+    def get_newest_file_by_date(self, bucket_name: str, prefix: str = "", starts_with: str = ""):
+        """
+        Retorna la ruta s3://bucket/key del archivo más reciente dentro de un prefijo S3.
+        Filtra por archivos que comiencen con `starts_with` si se proporciona.
+        La búsqueda de la fecha se hace por el filename (YYYY-MM-DD, YYYYMMDD, YYYYMMDD_HHMMSS)
+        Si no encuentra fecha en filenames, usa LastModified como fallback.
+        """
+        logger.info(f"Buscando archivo más reciente en s3://{bucket_name}/{prefix} con inicio '{starts_with}'")
 
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=self.aws_access_key,
+            aws_secret_access_key=self.aws_secret_key,
+            region_name=self.aws_region
+        )
 
+        date_pattern = r"(\d{4}[-_]?\d{2}[-_]?\d{2})(?:[_-]?(\d{6}))?"
 
-# =========================
-# BLOQUE PRINCIPAL DE PRUEBA
-# =========================
+        paginator = s3.get_paginator("list_objects_v2")
+        page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+
+        newest_file = None
+        newest_date = None
+
+        fallback_file = None
+        fallback_date = None
+
+        total_checked = 0
+        for page in page_iterator:
+            for obj in page.get("Contents", []):
+                total_checked += 1
+                key = obj["Key"]
+
+                # Filtrar por el comienzo del nombre si se indica
+                filename = key.split("/")[-1]
+                if starts_with and not filename.startswith(starts_with):
+                    continue
+
+                # 1) intentar extraer fecha del nombre
+                m = re.search(date_pattern, key)
+                if m:
+                    date_part = m.group(1).replace("_", "-")
+                    time_part = m.group(2)
+
+                    parsed = None
+                    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+                        try:
+                            parsed = datetime.strptime(date_part, fmt)
+                            break
+                        except Exception:
+                            pass
+
+                    if parsed and time_part:
+                        try:
+                            t = datetime.strptime(time_part, "%H%M%S").time()
+                            parsed = datetime.combine(parsed.date(), t)
+                        except Exception:
+                            pass
+
+                    if parsed:
+                        if (newest_date is None) or (parsed > newest_date):
+                            newest_date = parsed
+                            newest_file = key
+
+                # fallback por LastModified
+                lm = obj.get("LastModified")
+                if lm:
+                    if (fallback_date is None) or (lm > fallback_date):
+                        fallback_date = lm
+                        fallback_file = key
+
+        logger.info(f"Se revisaron {total_checked} objetos en S3 bajo el prefijo.")
+
+        if newest_file:
+            ruta = f"s3://{bucket_name}/{newest_file}"
+            logger.success(f"Archivo más reciente encontrado por nombre: {ruta}")
+            return ruta
+
+        if fallback_file:
+            ruta = f"s3://{bucket_name}/{fallback_file}"
+            logger.warning("No se encontró fecha en nombres; retornando el archivo más reciente por LastModified.")
+            logger.success(f"Archivo más reciente (fallback): {ruta}")
+            return ruta
+
+        logger.warning("No se encontró ningún archivo con fecha válida ni objetos en el prefijo.")
+        return None
+
+# ------------------------------------------------------------
+#                  BLOQUE PRINCIPAL
+# ------------------------------------------------------------
 if __name__ == "__main__":
 
-    bucket_source = 'dcelip-dev-brz-blu-s3'
-    bucket_dest = 'dcelip-dev-artifacts-s3'
-    TYPES = ['socios', 'establecimientos', 'demograficas', 'cao_entrenamiento']
+    s3 = S3DataManager()
 
-    ANHO_SOCIOS, MES_SOCIOS, DIA_SOCIOS = '2025', '11', '5'
-    ANHO_ESTABLECIMIENTOS, MES_ESTABLECIMIENTOS, DIA_ESTABLECIMIENTOS = '2025', '11', '5'
-    ANHO_DEMOGRAFICAS, MES_DEMOGRAFICAS, DIA_DEMOGRAFICAS = '2025', '10', '31'
-    ANHO_ENTRENAMIENTO, MES_ENTRENAMIENTO, DIA_ENTRENAMIENTO = '2025', '11', '6'
+    BUCKET_SOURCE = 'dcelip-dev-brz-blu-s3'
+    BUCKET_DEST = 'dcelip-dev-artifacts-s3'
+    DESTINO = 'mlops/input/raw/'
 
-    s3_manager = S3DataManager(bucket_source, bucket_dest)
+    # ------------------------------------------------------------
+    #                1) GENERAR ARCHIVOS EN RAW
+    # ------------------------------------------------------------
 
-    df_socios = s3_manager.concat_files(TYPES[0], ANHO_SOCIOS, MES_SOCIOS, DIA_SOCIOS)
-    df_establecimientos = s3_manager.concat_files(TYPES[1], ANHO_ESTABLECIMIENTOS, MES_ESTABLECIMIENTOS, DIA_ESTABLECIMIENTOS)
-    df_demograficas = s3_manager.concat_files(TYPES[2], ANHO_DEMOGRAFICAS, MES_DEMOGRAFICAS, DIA_DEMOGRAFICAS)
-    df_entrenamiento = s3_manager.concat_files(TYPES[3], ANHO_ENTRENAMIENTO, MES_ENTRENAMIENTO, DIA_ENTRENAMIENTO)
+    df_socios = s3.load_dataframe_from_s3(
+        BUCKET_SOURCE,
+        'source=teradata/type=socios/year=2025/month=11/day=5/'
+    )
+    if not df_socios.empty:
+        s3.save_dataframe_to_s3(df_socios, BUCKET_DEST, DESTINO,
+                                'df_socios_2025-11-05.parquet')
 
-    s3_manager.save_bucket_data('mlops/input/raw/', 'df_socios_concat.parquet', df_socios)
-    s3_manager.save_bucket_data('mlops/input/raw/', 'df_establecimientos_concat.parquet', df_establecimientos)
-    s3_manager.save_bucket_data('mlops/input/raw/', 'df_demograficas_concat.parquet', df_demograficas)
-    s3_manager.save_bucket_data('mlops/input/raw/', 'df_entrenamiento_concat.parquet', df_entrenamiento)
+    df_establecimientos = s3.load_dataframe_from_s3(
+        BUCKET_SOURCE,
+        'source=teradata/type=establecimientos/year=2025/month=11/day=5/'
+    )
+    if not df_establecimientos.empty:
+        s3.save_dataframe_to_s3(df_establecimientos, BUCKET_DEST, DESTINO,
+                                'df_establecimientos_2025-11-05.parquet')
+
+    df_demograficas = s3.load_dataframe_from_s3(
+        BUCKET_SOURCE,
+        'source=teradata/type=demograficas/year=2025/month=10/day=31/'
+    )
+    if not df_demograficas.empty:
+        s3.save_dataframe_to_s3(df_demograficas, BUCKET_DEST, DESTINO,
+                                'df_demograficas_2025-10-31.parquet')
+
+    df_entrenamiento = s3.load_dataframe_from_s3(
+        BUCKET_SOURCE,
+        'source=teradata/type=cao_entrenamiento/year=2025/month=11/day=6/'
+    )
+    if not df_entrenamiento.empty:
+        s3.save_dataframe_to_s3(df_entrenamiento, BUCKET_DEST, DESTINO,
+                                'df_entrenamiento_2025-11-06.parquet')
+    
+    # ------------------------------------------------------------
+    #          2) IDENTIFICAR EL ARCHIVO MÁS RECIENTE POR TIPO
+    # ------------------------------------------------------------
+
+    logger.info("Buscando archivos más recientes en el bucket destino por tipo...")
+
+    archivo_socios = s3.get_newest_file_by_date(
+        bucket_name=BUCKET_DEST,
+        prefix=DESTINO,
+        starts_with="df_socios"
+    )
+
+    archivo_establecimientos = s3.get_newest_file_by_date(
+        bucket_name=BUCKET_DEST,
+        prefix=DESTINO,
+        starts_with="df_establecimientos"
+    )
+
+    archivo_entrenamiento = s3.get_newest_file_by_date(
+        bucket_name=BUCKET_DEST,
+        prefix=DESTINO,
+        starts_with="df_entrenamiento"
+    )
+
+    logger.info(f"Archivo más reciente df_socios: {archivo_socios}")
+    logger.info(f"Archivo más reciente df_establecimientos: {archivo_establecimientos}")
+    logger.info(f"Archivo más reciente df_entrenamiento: {archivo_entrenamiento}")

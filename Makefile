@@ -20,7 +20,7 @@ setup-env: ## Create virtual environment with UV
 
 install: ## Install dependencies with UV
 	@echo "$(BLUE)Installing dependencies with UV...$(NC)"
-	uv pip install -r requirements.txt
+	uv add .\requirements.txt
 	@echo "$(GREEN)✓ Dependencies installed!$(NC)"
 
 test: ## Run all unit tests
@@ -35,7 +35,7 @@ test-coverage: ## Run tests with coverage report
 
 run-sampling: ## Run data sampling component
 	@echo "$(BLUE)Running data sampling...$(NC)"
-	python src/pipelines/1-data_sampling/main.py \
+	uv run src/pipelines/1-data_sampling/main.py \
 		--input_path data/01-raw/df_extendida_clean.parquet \
 		--output_path data/02-sampled/sampled_data.parquet \
 		--sample_size 2000 \
@@ -44,7 +44,7 @@ run-sampling: ## Run data sampling component
 
 run-features: run-sampling ## Run feature engineering component
 	@echo "$(BLUE)Running feature engineering...$(NC)"
-	python src/pipelines/2-feature_engineering/main.py \
+	uv run src/pipelines/2-feature_engineering/main.py \
 		--input_path data/02-sampled/sampled_data.parquet \
 		--output_path data/03-features/features.parquet \
 		--encoders_path models/label_encoders.pkl
@@ -52,7 +52,7 @@ run-features: run-sampling ## Run feature engineering component
 
 run-training: run-features ## Run model training
 	@echo "$(BLUE)Running model training...$(NC)"
-	python src/pipelines/3-training/main.py \
+	uv run src/pipelines/3-training/main.py \
 		--input_path data/03-features/features.parquet \
 		--model_path models/dnn_model.pth \
 		--encoders_path models/label_encoders.pkl \
@@ -61,7 +61,7 @@ run-training: run-features ## Run model training
 
 run-evaluation: run-training ## Run model evaluation
 	@echo "$(BLUE)Running model evaluation...$(NC)"
-	python src/pipelines/4-evaluation/main.py \
+	uv run src/pipelines/4-evaluation/main.py \
 		--model_path models/dnn_model.pth \
 		--data_path data/03-features/features.parquet \
 		--encoders_path models/label_encoders.pkl \
@@ -70,7 +70,7 @@ run-evaluation: run-training ## Run model evaluation
 
 run-registration: run-evaluation ## Register model in MLflow
 	@echo "$(BLUE)Registering model...$(NC)"
-	python src/pipelines/5-model_registration/main.py \
+	uv run src/pipelines/5-model_registration/main.py \
 		--model_path models/dnn_model.pth \
 		--encoders_path models/label_encoders.pkl \
 		--metrics_path reports/metrics.json \
@@ -92,11 +92,11 @@ run-pipeline: ## Run complete pipeline
 
 run-api: ## Start FastAPI server
 	@echo "$(BLUE)Starting FastAPI server...$(NC)"
-	uvicorn entrypoint.main:app --reload --host 0.0.0.0 --port 8001
+	python -m uvicorn entrypoint.main:app --reload --host 0.0.0.0 --port 8000
 
 run-dashboard: ## Start monitoring dashboard
 	@echo "$(BLUE)Starting Streamlit dashboard...$(NC)"
-	streamlit run dashboard/app.py
+	uv run streamlit run dashboard/app.py
 
 test-api: ## Run API integration tests
 	@echo "$(BLUE)Testing API endpoints...$(NC)"

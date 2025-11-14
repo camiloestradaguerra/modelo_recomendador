@@ -9,12 +9,18 @@ pyarrow==14.0.1
 
 # MLOps Tools
 mlflow==2.9.2
+setuptools>=68.0.0
+wheel>=0.41.0
+
 
 # API Framework
-fastapi==0.108.0
-uvicorn[standard]==0.25.0
+# fastapi==0.108.0
+# uvicorn[standard]==0.25.0
 pydantic==2.5.3
 pydantic-settings==2.1.0
+uvicorn[standard]
+fastapi
+
 
 # Testing
 pytest==7.4.3
