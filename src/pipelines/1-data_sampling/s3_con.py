@@ -2,7 +2,8 @@ import os
 import boto3
 import pandas as pd
 import s3fs
-from dotenv import load_dotenv
+from datetime import datetime
+
 
 class S3DataManager:
     def __init__(self, bucket_source, bucket_dest):
@@ -13,21 +14,32 @@ class S3DataManager:
         self._init_s3()
 
     def _load_env_credentials(self):
-        """Carga las credenciales de AWS desde el archivo .env"""
-        load_dotenv() 
-        self.aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-        self.aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-        self.aws_region = os.getenv('AWS_DEFAULT_REGION')
+        """Carga las credenciales de AWS desde variables de entorno."""
+        
+        self.aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        self.aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
 
         if not all([self.aws_access_key, self.aws_secret_key, self.aws_region]):
-            raise ValueError("Faltan variables de entorno AWS en el archivo .env")
+            raise ValueError(
+                "Faltan variables de entorno de AWS. "
+                "Asegúrate de que AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY y AWS_DEFAULT_REGION "
+                "están configuradas en GitHub Actions."
+            )
 
     def _init_s3(self):
-        """Inicializa cliente y sistema de archivos S3"""
-        boto3.client('s3')
+        """Inicializa cliente y sistema de archivos S3."""
+        boto3.client(
+            's3',
+            aws_access_key_id=self.aws_access_key,
+            aws_secret_access_key=self.aws_secret_key,
+            region_name=self.aws_region
+        )
+
         self.fs = s3fs.S3FileSystem(
             key=self.aws_access_key,
-            secret=self.aws_secret_key
+            secret=self.aws_secret_key,
+            client_kwargs={'region_name': self.aws_region}
         )
 
     def concat_files(self, type, year, month, day):
@@ -35,15 +47,22 @@ class S3DataManager:
         prefix = f'source=teradata/type={type}/year={year}/month={month}/day={day}/'
         path_s3 = f'{self.bucket_source}/{prefix}'
 
-        parquet_files = [f's3://{file}' for file in self.fs.ls(path_s3) if file.endswith('.parquet')]
+        parquet_files = [
+            f's3://{file}' 
+            for file in self.fs.ls(path_s3) 
+            if file.endswith('.parquet')
+        ]
         print(f" Archivos encontrados para '{type}': {len(parquet_files)}")
 
         df_list = []
         for file in parquet_files:
-            df = pd.read_parquet(file, storage_options={
-                'key': self.aws_access_key,
-                'secret': self.aws_secret_key
-            })
+            df = pd.read_parquet(
+                file,
+                storage_options={
+                    'key': self.aws_access_key,
+                    'secret': self.aws_secret_key
+                }
+            )
             df_list.append(df)
 
         df_concat = pd.concat(df_list, ignore_index=True)
@@ -52,8 +71,17 @@ class S3DataManager:
         return df_concat
 
     def save_bucket_data(self, path_destino, nombre_archivo, df):
-        """Guarda un DataFrame como parquet en el bucket destino"""
-        ruta_relativa = f"{path_destino}{nombre_archivo}"
+        """Guarda un DataFrame como parquet en el bucket destino con timestamp."""
+
+        # ===== NUEVA LÓGICA =====
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Dividir nombre y extensión
+        base, ext = nombre_archivo.split(".")
+        nombre_archivo_timestamp = f"{base}_{timestamp}.{ext}"
+        # =========================
+
+        ruta_relativa = f"{path_destino}{nombre_archivo_timestamp}"
         ruta_s3_destino = f"s3://{self.bucket_dest}/{ruta_relativa}"
 
         try:
@@ -62,6 +90,7 @@ class S3DataManager:
             print(f"Archivo guardado correctamente en: {ruta_s3_destino}")
         except Exception as e:
             print(f"Error al guardar en S3: {e}")
+
 
 
 # =========================

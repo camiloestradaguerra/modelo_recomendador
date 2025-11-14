@@ -49,6 +49,22 @@ jobs:
             echo "✅ Credenciales AWS presentes en el entorno del pipeline"
           fi
 
+       # -----------------------------------------------------
+      # 5. Run your script (IMPORTANT)
+      # -----------------------------------------------------
+      - name: Ejecutar pipeline S3 (s3_con.py)
+        run: |
+          echo "▶️ Iniciando ejecución del script..."
+          python src/pipelines/1-data_sampling/s3_con.py
+
+      # -----------------------------------------------------
+      # 6. Success message
+      # -----------------------------------------------------
+      - name: Confirmar ejecución exitosa
+        if: success()
+        run: |
+          echo "🎉 El script s3_con.py se ejecutó correctamente y los archivos fueron subidos a S3."
+
   #     - name: Cache pip dependencies
   #       uses: actions/cache@v4
   #       with:
