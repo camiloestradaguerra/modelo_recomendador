@@ -218,219 +218,296 @@ class S3DataManager:
         return None
 
 class DataPreprocessingPipeline:
-    """Data preprocessing pipeline for recommendation system"""
+    """Pipeline de preprocesamiento de datos para el sistema de recomendación.
 
-    def __init__(self):
+    Buenas prácticas aplicadas:
+    - Uso de `logger` en lugar de `print`.
+    - Validación temprana de variables de entorno.
+    - Parámetros configurables (bucket y rutas) con valores por defecto.
+    - Docstrings en métodos y manejo de excepciones para pasos críticos.
+    """
+
+    def __init__(self,
+                 bucket_name: str = 'dcelip-dev-artifacts-s3',
+                 file_raw_path: str = 'mlops/input/raw/',
+                 file_procesed_path: str = 'mlops/input/processed/') -> None:
+        """Inicializa la pipeline.
+
+        Parametros:
+        - bucket_name: nombre del bucket destino por defecto.
+        - file_raw_path: prefijo donde están los archivos raw.
+        - file_procesed_path: prefijo para archivos procesados.
+        """
 
         self.aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
         self.aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
         self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
 
         if not all([self.aws_access_key, self.aws_secret_key, self.aws_region]):
+            logger.error("Faltan variables de entorno AWS en el archivo .env o variables de entorno del sistema.")
             raise ValueError("Faltan variables de entorno AWS en el archivo .env")
-        
-        self.bucket_name = 'dcelip-dev-artifacts-s3'
-        self.file_raw_path = 'mlops/input/raw/'
-        self.file_procesed_path = 'mlops/input/processed/'
+
+        self.bucket_name = bucket_name
+        self.file_raw_path = file_raw_path
+        self.file_procesed_path = file_procesed_path
+
+        logger.info("DataPreprocessingPipeline inicializada correctamente. bucket=%s prefix_raw=%s",
+                    self.bucket_name, self.file_raw_path)
         
     def _load_raw_data(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Load raw data from the newest parquet files in S3 using S3DataManager."""
+        logger.info("Configurando acceso a S3 para cargar datos raw...")
 
-        print("Configurando acceso a S3...")
+        try:
+            s3_manager = S3DataManager()  # instancia de S3DataManager ya configurada con credenciales
 
-        s3_manager = S3DataManager()  # instancia de S3DataManager ya configurada con credenciales
+            # Obtener la ruta del archivo más reciente para cada dataset
+            s3_uri_socios = s3_manager.get_newest_file_by_date(
+                bucket_name=self.bucket_name,
+                prefix=self.file_raw_path,
+                starts_with="df_socios"
+            )
 
-        # Obtener la ruta del archivo más reciente para cada dataset
-        s3_uri_socios = s3_manager.get_newest_file_by_date(
-            bucket_name=self.bucket_name,
-            prefix=self.file_raw_path,
-            starts_with="df_socios"
-        )
+            s3_uri_establecimientos = s3_manager.get_newest_file_by_date(
+                bucket_name=self.bucket_name,
+                prefix=self.file_raw_path,
+                starts_with="df_establecimientos"
+            )
 
-        s3_uri_establecimientos = s3_manager.get_newest_file_by_date(
-            bucket_name=self.bucket_name,
-            prefix=self.file_raw_path,
-            starts_with="df_establecimientos"
-        )
+            s3_uri_entrenamiento = s3_manager.get_newest_file_by_date(
+                bucket_name=self.bucket_name,
+                prefix=self.file_raw_path,
+                starts_with="df_entrenamiento"
+            )
 
-        s3_uri_entrenamiento = s3_manager.get_newest_file_by_date(
-            bucket_name=self.bucket_name,
-            prefix=self.file_raw_path,
-            starts_with="df_entrenamiento"
-        )
+            if not all([s3_uri_socios, s3_uri_establecimientos, s3_uri_entrenamiento]):
+                logger.error("No se encontraron archivos recientes para todos los datasets.")
+                raise FileNotFoundError("No se encontraron archivos recientes para todos los datasets.")
 
-        if not all([s3_uri_socios, s3_uri_establecimientos, s3_uri_entrenamiento]):
-            raise FileNotFoundError("No se encontraron archivos recientes para todos los datasets.")
+            logger.info("Leyendo archivos más recientes desde S3...")
 
-        print("Leyendo archivos más recientes desde S3...")
+            # Validar que las URIs existen antes de leer (get_newest_file_by_date ya retorna None si no hay)
+            df_socios = pd.read_parquet(
+                s3_uri_socios,
+                storage_options={'key': s3_manager.aws_access_key, 'secret': s3_manager.aws_secret_key}
+            )
 
-        df_socios = pd.read_parquet(
-            s3_uri_socios,
-            storage_options={'key': s3_manager.aws_access_key, 'secret': s3_manager.aws_secret_key}
-        )
+            df_establecimientos = pd.read_parquet(
+                s3_uri_establecimientos,
+                storage_options={'key': s3_manager.aws_access_key, 'secret': s3_manager.aws_secret_key}
+            )
 
-        df_establecimientos = pd.read_parquet(
-            s3_uri_establecimientos,
-            storage_options={'key': s3_manager.aws_access_key, 'secret': s3_manager.aws_secret_key}
-        )
+            df_entrenamiento = pd.read_parquet(
+                s3_uri_entrenamiento,
+                storage_options={'key': s3_manager.aws_access_key, 'secret': s3_manager.aws_secret_key}
+            )
 
-        df_entrenamiento = pd.read_parquet(
-            s3_uri_entrenamiento,
-            storage_options={'key': s3_manager.aws_access_key, 'secret': s3_manager.aws_secret_key}
-        )
+            logger.info("Archivos cargados correctamente: - df_socios: %s - df_establecimientos: %s - df_entrenamiento: %s",
+                        df_socios.shape, df_establecimientos.shape, df_entrenamiento.shape)
 
-        print("Archivos cargados correctamente:")
-        print(f"- df_socios: {df_socios.shape}")
-        print(f"- df_establecimientos: {df_establecimientos.shape}")
-        print(f"- df_entrenamiento: {df_entrenamiento.shape}")
+            self.df_socios = df_socios
+            self.df_establecimientos = df_establecimientos
+            self.df_entrenamiento = df_entrenamiento
 
-        self.df_socios = df_socios
-        self.df_establecimientos = df_establecimientos
-        self.df_entrenamiento = df_entrenamiento
-        
-        return df_socios, df_establecimientos, df_entrenamiento
+            return df_socios, df_establecimientos, df_entrenamiento
+
+        except Exception as e:
+            logger.exception("Error cargando datos raw desde S3: %s", e)
+            raise
+        finally:
+            # aquí podríamos limpiar recursos si fuera necesario
+            pass
     
     def data_extended(self) -> pd.DataFrame:
         """Cleans and merges socios, establecimientos, and entrenamiento datasets"""
-        print("Iniciando proceso de limpieza...")
+        logger.info("Iniciando proceso de limpieza y merge de datasets...")
 
-        df_socios = self.df_socios 
-        df_establecimientos = self.df_establecimientos 
-        df_entrenamiento = self.df_entrenamiento
+        try:
+            df_socios = self.df_socios
+            df_establecimientos = self.df_establecimientos
+            df_entrenamiento = self.df_entrenamiento
 
-        # df_socios, df_establecimientos, df_entrenamiento = self._load_raw_data()
+            # Validaciones básicas de tipos
+            if not isinstance(df_socios, pd.DataFrame) or not isinstance(df_establecimientos, pd.DataFrame) or not isinstance(df_entrenamiento, pd.DataFrame):
+                logger.error("Los objetos de entrada deben ser DataFrame. Revise _load_raw_data o las asignaciones previas.")
+                raise TypeError("Entradas a data_extended deben ser pandas.DataFrame")
 
-        # --- Limpieza socios ---
-        df_socios = df_socios[['Id_Persona', 'ESTADO_CIVIL', 'Edad', 'GENERO', 'ROL',
-                            'Antiguedad_Socio_Unico', 'SEGMENTO_COMERCIAL', 'Ciudad',
-                            'Zona', 'Region']]
-        df_socios['Id_Persona'] = pd.to_numeric(df_socios['Id_Persona'], errors='coerce')
-        df_socios['Antiguedad_Socio_Unico'] = df_socios['Antiguedad_Socio_Unico'].fillna(
-            df_socios['Antiguedad_Socio_Unico'].mean()
-        )
+            # --- Limpieza socios ---
+            df_socios = df_socios[['Id_Persona', 'ESTADO_CIVIL', 'Edad', 'GENERO', 'ROL',
+                                'Antiguedad_Socio_Unico', 'SEGMENTO_COMERCIAL', 'Ciudad',
+                                'Zona', 'Region']]
+            df_socios['Id_Persona'] = pd.to_numeric(df_socios['Id_Persona'], errors='coerce')
+            df_socios['Antiguedad_Socio_Unico'] = df_socios['Antiguedad_Socio_Unico'].fillna(
+                df_socios['Antiguedad_Socio_Unico'].mean()
+            )
 
-        for col in ['Ciudad', 'Zona', 'Region']:
-            moda = df_socios[col].mode(dropna=True)[0]
-            df_socios[col] = df_socios[col].fillna(moda)
+            for col in ['Ciudad', 'Zona', 'Region']:
+                moda = df_socios[col].mode(dropna=True)[0]
+                df_socios[col] = df_socios[col].fillna(moda)
 
-        # --- Limpieza establecimientos ---
-        df_establecimientos = df_establecimientos[['ID_ESTABLECIMIENTO', 'CADENA', 'ESTABLECIMIENTO']]
-        df_establecimientos['ID_ESTABLECIMIENTO'] = pd.to_numeric(df_establecimientos['ID_ESTABLECIMIENTO'], errors="coerce")
+            # --- Limpieza establecimientos ---
+            df_establecimientos = df_establecimientos[['ID_ESTABLECIMIENTO', 'CADENA', 'ESTABLECIMIENTO']]
+            df_establecimientos['ID_ESTABLECIMIENTO'] = pd.to_numeric(df_establecimientos['ID_ESTABLECIMIENTO'], errors="coerce")
 
-        # --- Limpieza entrenamiento ---
-        df_entrenamiento = df_entrenamiento[['DiaID', 'Id_Persona', 'ID_ESTABLECIMIENTO',
-                                            'ESPECIALIDAD', 'HORA_INICIO', 'HORA_FIN',
-                                            'LOCALIZACION_EXTERNA', 'MONTO', 'Neteo_Mensual', 'Neteo_Diario']]
-        df_entrenamiento['Id_Persona'] = pd.to_numeric(df_entrenamiento['Id_Persona'], errors='coerce')
-        df_entrenamiento['ID_ESTABLECIMIENTO'] = pd.to_numeric(df_entrenamiento['ID_ESTABLECIMIENTO'], errors="coerce")
-        df_entrenamiento['MONTO'] = pd.to_numeric(df_entrenamiento['MONTO'], errors='coerce')
-        df_entrenamiento['DiaID'] = pd.to_datetime(df_entrenamiento['DiaID'], errors='coerce')
-        df_entrenamiento['HORA_INICIO'] = pd.to_datetime(
-            df_entrenamiento['DiaID'].dt.strftime('%Y-%m-%d') + ' ' + df_entrenamiento['HORA_INICIO'],
-            errors='coerce'
-        )
-        df_entrenamiento['HORA_FIN'] = pd.to_datetime(
-            df_entrenamiento['DiaID'].dt.strftime('%Y-%m-%d') + ' ' + df_entrenamiento['HORA_FIN'],
-            errors='coerce'
-        )
+            # --- Limpieza entrenamiento ---
+            df_entrenamiento = df_entrenamiento[['DiaID', 'Id_Persona', 'ID_ESTABLECIMIENTO',
+                                                'ESPECIALIDAD', 'HORA_INICIO', 'HORA_FIN',
+                                                'LOCALIZACION_EXTERNA', 'MONTO', 'Neteo_Mensual', 'Neteo_Diario']]
+            df_entrenamiento['Id_Persona'] = pd.to_numeric(df_entrenamiento['Id_Persona'], errors='coerce')
+            df_entrenamiento['ID_ESTABLECIMIENTO'] = pd.to_numeric(df_entrenamiento['ID_ESTABLECIMIENTO'], errors='coerce')
+            df_entrenamiento['MONTO'] = pd.to_numeric(df_entrenamiento['MONTO'], errors='coerce')
+            df_entrenamiento['DiaID'] = pd.to_datetime(df_entrenamiento['DiaID'], errors='coerce')
+            df_entrenamiento['HORA_INICIO'] = pd.to_datetime(
+                df_entrenamiento['DiaID'].dt.strftime('%Y-%m-%d') + ' ' + df_entrenamiento['HORA_INICIO'],
+                errors='coerce'
+            )
+            df_entrenamiento['HORA_FIN'] = pd.to_datetime(
+                df_entrenamiento['DiaID'].dt.strftime('%Y-%m-%d') + ' ' + df_entrenamiento['HORA_FIN'],
+                errors='coerce'
+            )
 
-        df_entrenamiento = df_entrenamiento[df_entrenamiento["Id_Persona"].isin(df_socios["Id_Persona"])]
+            df_entrenamiento = df_entrenamiento[df_entrenamiento["Id_Persona"].isin(df_socios["Id_Persona"])]
 
-        df_merge1 = df_entrenamiento.merge(df_socios, on='Id_Persona', how='left')
-        data_extendida = (
-            df_merge1.merge(df_establecimientos, on='ID_ESTABLECIMIENTO', how='left')
-            .dropna(subset=['CADENA', 'ESTABLECIMIENTO', 'ESPECIALIDAD', 'LOCALIZACION_EXTERNA'])
-        )
+            df_merge1 = df_entrenamiento.merge(df_socios, on='Id_Persona', how='left')
+            data_extendida = (
+                df_merge1.merge(df_establecimientos, on='ID_ESTABLECIMIENTO', how='left')
+                .dropna(subset=['CADENA', 'ESTABLECIMIENTO', 'ESPECIALIDAD', 'LOCALIZACION_EXTERNA'])
+            )
 
-        return data_extendida
+            logger.info("Data extendida generada con shape: %s", data_extendida.shape)
+            return data_extendida
+
+        except Exception as e:
+            logger.exception("Error durante data_extended: %s", e)
+            raise
+        finally:
+            # Se podría medir duración o liberar memoria intermedia
+            pass
 
     def clean_recent_text_columns(self, df) -> pd.DataFrame:
-            
-        df.columns = df.columns.str.lower()
-            
-        columnas_object = df.select_dtypes(include='object').columns.tolist()
-        # Exclude 'id_persona' from the list of columns to be text-cleaned
-        if 'id_persona' in columnas_object:
-            columnas_object.remove('id_persona') 
+        """Normaliza y limpia columnas de texto del DataFrame.
 
-        # Convert remaining object columns to string and apply text cleaning
-        for col in columnas_object:
-            df[col] = df[col].astype(str).apply(lambda texto: re.sub(r"\s\s+", " ",
-                                re.sub(r"[\r\n]+", ' ',
-                                re.sub(r'\[#*.>=\]', '',
-                                re.sub(r'[^a-z ]', ' ',
-                                re.sub(r" \d+", ' ',
-                                texto.lower()))))).strip())
-        
-        df['id_persona'] = pd.to_numeric(df['id_persona'], errors='coerce')
-        df['id_persona'] = df['id_persona'].astype('Int64')
-        df['antiguedad_socio_unico'] = df['antiguedad_socio_unico'].astype(int)
-        df['especialidad'] = df['especialidad'].str.strip().str.title()
-        df['localizacion_externa'] = df['localizacion_externa'].str.strip().str.title()
-        df['estado_civil'] = df['estado_civil'].str.strip().str.title()
-        df['genero'] = df['genero'].str.strip().str.title()
-        df['segmento_comercial'] = df['segmento_comercial'].str.strip().str.title()
-        df['ciudad'] =  df['ciudad'].str.strip().str.title()
-        df['zona'] = df['zona'].str.strip().str.title()
-        df['region'] = df['region'].str.strip().str.title()
-        df['cadena'] = df['cadena'].str.strip().str.title()
-        df['establecimiento'] = df['establecimiento'].str.strip().str.title()
+        - Pasa a minúsculas, elimina saltos de línea, caracteres no alfabéticos y números sueltos.
+        - Convierte columnas específicas a tipos apropiados.
+        """
 
-        return df
+        logger.info("Limpiando columnas de texto recientes. Columnas iniciales: %s", df.shape[1])
+
+        try:
+            df.columns = df.columns.str.lower()
+
+            columnas_object = df.select_dtypes(include='object').columns.tolist()
+            # Exclude 'id_persona' from the list of columns to be text-cleaned
+            if 'id_persona' in columnas_object:
+                columnas_object.remove('id_persona')
+
+            # Convert remaining object columns to string and apply text cleaning
+            for col in columnas_object:
+                df[col] = df[col].astype(str).apply(lambda texto: re.sub(r"\s\s+", " ",
+                                    re.sub(r"[\r\n]+", ' ',
+                                    re.sub(r'\[#*.>=\]', '',
+                                    re.sub(r'[^a-z ]', ' ',
+                                    re.sub(r" \d+", ' ',
+                                    texto.lower()))))).strip())
+
+            df['id_persona'] = pd.to_numeric(df['id_persona'], errors='coerce')
+            df['id_persona'] = df['id_persona'].astype('Int64')
+            df['antiguedad_socio_unico'] = df['antiguedad_socio_unico'].astype(int)
+            df['especialidad'] = df['especialidad'].str.strip().str.title()
+            df['localizacion_externa'] = df['localizacion_externa'].str.strip().str.title()
+            df['estado_civil'] = df['estado_civil'].str.strip().str.title()
+            df['genero'] = df['genero'].str.strip().str.title()
+            df['segmento_comercial'] = df['segmento_comercial'].str.strip().str.title()
+            df['ciudad'] =  df['ciudad'].str.strip().str.title()
+            df['zona'] = df['zona'].str.strip().str.title()
+            df['region'] = df['region'].str.strip().str.title()
+            df['cadena'] = df['cadena'].str.strip().str.title()
+            df['establecimiento'] = df['establecimiento'].str.strip().str.title()
+
+            logger.info("Limpieza de texto completada.")
+            return df
+
+        except Exception as e:
+            logger.exception("Error en clean_recent_text_columns: %s", e)
+            raise
     
     def outliers_filters(self, df) -> pd.DataFrame:
+        """Aplica filtros heurísticos para reducir outliers y ciudades poco representadas.
 
-        df = df[df['antiguedad_socio_unico']<df['antiguedad_socio_unico'].quantile(0.99)].reset_index(drop=True)
+        Retorna un DataFrame filtrado.
+        """
 
-        df_by_city = df.groupby('ciudad')['antiguedad_socio_unico'].size().reset_index().sort_values(by='antiguedad_socio_unico', ascending=False)
+        logger.info("Aplicando filtros de outliers...")
 
-        ciudades_con_alta_antiguedad_df = df_by_city[df_by_city['antiguedad_socio_unico'] > 25]
-        nombres_de_ciudades = ciudades_con_alta_antiguedad_df['ciudad'].unique()
+        try:
+            df = df[df['antiguedad_socio_unico']<df['antiguedad_socio_unico'].quantile(0.99)].reset_index(drop=True)
 
-        df_filtrado = df[df['ciudad'].isin(nombres_de_ciudades)]
+            df_by_city = df.groupby('ciudad')['antiguedad_socio_unico'].size().reset_index().sort_values(by='antiguedad_socio_unico', ascending=False)
 
-        df_frec_cadena = df_filtrado['cadena'].value_counts(ascending=False).reset_index()
+            ciudades_con_alta_antiguedad_df = df_by_city[df_by_city['antiguedad_socio_unico'] > 25]
+            nombres_de_ciudades = ciudades_con_alta_antiguedad_df['ciudad'].unique()
 
-        filtro_cadena = df_frec_cadena[df_frec_cadena['count'] < 7]['cadena'].unique()
-        
-        df_filtrado_cadena = df_filtrado[~df_filtrado['cadena'].isin(filtro_cadena)]
+            df_filtrado = df[df['ciudad'].isin(nombres_de_ciudades)]
 
-        return df_filtrado_cadena
+            df_frec_cadena = df_filtrado['cadena'].value_counts(ascending=False).reset_index()
+
+            filtro_cadena = df_frec_cadena[df_frec_cadena['count'] < 7]['cadena'].unique()
+            
+            df_filtrado_cadena = df_filtrado[~df_filtrado['cadena'].isin(filtro_cadena)]
+
+            logger.info("Outliers filtrados. Resultado shape: %s", df_filtrado_cadena.shape)
+            return df_filtrado_cadena
+
+        except Exception as e:
+            logger.exception("Error en outliers_filters: %s", e)
+            raise
 
     def normalization_establecimientos(self, df) -> pd.DataFrame:
 
         if not all([self.aws_access_key, self.aws_secret_key, self.aws_region]):
+            logger.error("Faltan variables de entorno AWS. Verifica que AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY y AWS_DEFAULT_REGION estén definidos.")
             raise EnvironmentError(
                 "Faltan variables de entorno AWS. Verifica que AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY y AWS_DEFAULT_REGION estén definidos."
         )
 
+        logger.info("Normalizando nombres de establecimientos...")
 
-        print("Configurando acceso a S3...")
-        s3 = boto3.client('s3')
-        fs = s3fs.S3FileSystem()
-        
-        diccionario_establecimientos = {}
+        try:
+            s3 = boto3.client('s3')
+            fs = s3fs.S3FileSystem()
+            
+            diccionario_establecimientos = {}
 
-        with open("diccionario_establecimientos.txt", "r", encoding="utf-8") as f:
-            for linea in f:
-                if ":" in linea:
-                    clave, valor = linea.strip().split(":", 1)
-                    diccionario_establecimientos[clave.strip()] = valor.strip()
+            dict_path = Path("diccionario_establecimientos.txt")
+            if not dict_path.exists():
+                logger.error("No se encontró 'diccionario_establecimientos.txt' en el directorio actual: %s", dict_path.resolve())
+                raise FileNotFoundError(f"diccionario_establecimientos.txt no existe: {dict_path}")
+
+            with dict_path.open("r", encoding="utf-8") as f:
+                for linea in f:
+                    if ":" in linea:
+                        clave, valor = linea.strip().split(":", 1)
+                        diccionario_establecimientos[clave.strip()] = valor.strip()
 
 
-        df['establecimiento'] = df['establecimiento'].astype(str).str.strip().str.lower()
+            df['establecimiento'] = df['establecimiento'].astype(str).str.strip().str.lower()
 
-        df['establecimiento'] = df['establecimiento'].map(diccionario_establecimientos).fillna(df['establecimiento'])
+            df['establecimiento'] = df['establecimiento'].map(diccionario_establecimientos).fillna(df['establecimiento'])
 
-        df_establecimiento = df['establecimiento'].value_counts(ascending=False).reset_index()
+            df_establecimiento = df['establecimiento'].value_counts(ascending=False).reset_index()
 
-        filtro_establecimiento = df_establecimiento[df_establecimiento['count'] < 7]['establecimiento'].unique()
-        
-        df_filtrado_establecimiento = df[~df['establecimiento'].isin(filtro_establecimiento)]
+            filtro_establecimiento = df_establecimiento[df_establecimiento['count'] < 7]['establecimiento'].unique()
+            
+            df_filtrado_establecimiento = df[~df['establecimiento'].isin(filtro_establecimiento)]
 
-        data_extendida_clean = df_filtrado_establecimiento.copy()
+            data_extendida_clean = df_filtrado_establecimiento.copy()
 
-        return data_extendida_clean
+            logger.info("Normalización de establecimientos completada. Resultado shape: %s", data_extendida_clean.shape)
+            return data_extendida_clean
+
+        except Exception as e:
+            logger.exception("Error en normalization_establecimientos: %s", e)
+            raise
     
 # ------------------------------------------------------------
 #                  BLOQUE PRINCIPAL
@@ -598,7 +675,7 @@ if __name__ == "__main__":
     #     prefix=DESTINO_PROCESSED,
     #     starts_with="data_extendida_clean"
     # )
-    df_extendida = pd.read_parquet("data_extendida.parquet")
+    df_extendida = pd.read_parquet("df_extendida_clean.parquet")
 
     #df_extendida1 = s3.load_single_parquet(df_extendida)
     df_extendida1 = pipeline.clean_recent_text_columns(df_extendida)
