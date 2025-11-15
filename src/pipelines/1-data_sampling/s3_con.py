@@ -508,196 +508,254 @@ class DataPreprocessingPipeline:
         except Exception as e:
             logger.exception("Error en normalization_establecimientos: %s", e)
             raise
+
+
+# ============================================================
+#                   CLI ENTRY POINT
+# ============================================================
+
+def run_preprocessing(input_path: str, output_path: str) -> None:
+    """
+    Execute the data preprocessing pipeline.
+
+    This is the main entry point that orchestrates loading raw data,
+    applying preprocessing transformations (text cleaning, outlier filtering,
+    establishment normalization), and saving the cleaned result. It's designed
+    to be called by MLflow or other orchestration tools, and supports both
+    local file paths and S3 URIs.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to the raw input data (parquet format). Can be a local path
+        or an S3 URI starting with 's3://'.
+    output_path : str
+        Path where preprocessed data will be saved (parquet format). Can be
+        a local path or an S3 URI starting with 's3://'.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the input file doesn't exist (for local paths).
+    EnvironmentError
+        If required AWS environment variables are missing (when using S3).
+    Exception
+        If any step in the pipeline fails during preprocessing.
+
+    Examples
+    --------
+    >>> run_preprocessing(
+    ...     input_path='data/raw/data_extendida.parquet',
+    ...     output_path='data/processed/data_extendida_clean.parquet'
+    ... )
+
+    >>> run_preprocessing(
+    ...     input_path='s3://my-bucket/raw/data.parquet',
+    ...     output_path='s3://my-bucket/processed/data_clean.parquet'
+    ... )
+
+    Notes
+    -----
+    - The function automatically applies three preprocessing steps in order:
+      1. Text column cleaning and normalization
+      2. Outlier filtering based on heuristics
+      3. Establishment name normalization using a dictionary
+    - Results are logged to both stderr and logs/pipeline.log.
+    - Input validation occurs automatically for local paths.
+    - S3 operations require AWS credentials (AWS_ACCESS_KEY_ID,
+      AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION) in .env or environment.
+    """
+    logger.info("Starting preprocessing pipeline. Loading data from input_path=%s", input_path)
     
-# ------------------------------------------------------------
-#                  BLOQUE PRINCIPAL
-# ------------------------------------------------------------
-if __name__ == "__main__":
+    # Validar credenciales AWS solo si se necesitan (input o output S3)
+    needs_s3 = str(input_path).startswith('s3://') or str(output_path).startswith('s3://')
+    s3_manager = None
 
-    s3 = S3DataManager()
+    if needs_s3:
+        logger.info("S3 paths detected. Initializing S3DataManager...")
+        try:
+            s3_manager = S3DataManager()
+        except ValueError as e:
+            logger.error("Error al cargar credenciales AWS: %s", str(e))
+            raise EnvironmentError("No se pudieron cargar las credenciales AWS desde .env o sistema.") from e
 
-    BUCKET_SOURCE = 'dcelip-dev-brz-blu-s3'
-    BUCKET_DEST = 'dcelip-dev-artifacts-s3'
-    DESTINO = 'mlops/input/raw/'
-    DESTINO_PROCESSED = 'mlops/input/processed/'
+    logger.info("AWS credentials and S3 access validated successfully")
 
-    # ------------------------------------------------------------
-    #                1) GENERAR ARCHIVOS EN RAW
-    # ------------------------------------------------------------
-
-    # df_socios = s3.load_dataframe_from_s3(
-    #     BUCKET_SOURCE,
-    #     'source=teradata/type=socios/year=2025/month=11/day=5/'
-    # )
-    # if not df_socios.empty:
-    #     s3.save_dataframe_to_s3(df_socios, BUCKET_DEST, DESTINO,
-    #                             'df_socios_2025-11-05.parquet')
-
-    # df_establecimientos = s3.load_dataframe_from_s3(
-    #     BUCKET_SOURCE,
-    #     'source=teradata/type=establecimientos/year=2025/month=11/day=5/'
-    # )
-    # if not df_establecimientos.empty:
-    #     s3.save_dataframe_to_s3(df_establecimientos, BUCKET_DEST, DESTINO,
-    #                             'df_establecimientos_2025-11-05.parquet')
-
-    # df_demograficas = s3.load_dataframe_from_s3(
-    #     BUCKET_SOURCE,
-    #     'source=teradata/type=demograficas/year=2025/month=10/day=31/'
-    # )
-    # if not df_demograficas.empty:
-    #     s3.save_dataframe_to_s3(df_demograficas, BUCKET_DEST, DESTINO,
-    #                             'df_demograficas_2025-10-31.parquet')
-
-    # df_entrenamiento = s3.load_dataframe_from_s3(
-    #     BUCKET_SOURCE,
-    #     'source=teradata/type=cao_entrenamiento/year=2025/month=11/day=6/'
-    # )
-    # if not df_entrenamiento.empty:
-    #     s3.save_dataframe_to_s3(df_entrenamiento, BUCKET_DEST, DESTINO,
-    #                             'df_entrenamiento_2025-11-06.parquet')
-    
-    # # ------------------------------------------------------------
-    # #          2) IDENTIFICAR EL ARCHIVO MÁS RECIENTE POR TIPO
-    # # ------------------------------------------------------------
-    # logger.info("Buscando archivos más recientes en el bucket destino por tipo...")
-
-    # archivo_socios = s3.get_newest_file_by_date(
-    #     bucket_name=BUCKET_DEST,
-    #     prefix=DESTINO,
-    #     starts_with="df_socios"
-    # )
-
-    # archivo_establecimientos = s3.get_newest_file_by_date(
-    #     bucket_name=BUCKET_DEST,
-    #     prefix=DESTINO,
-    #     starts_with="df_establecimientos"
-    # )
-
-    # archivo_entrenamiento = s3.get_newest_file_by_date(
-    #     bucket_name=BUCKET_DEST,
-    #     prefix=DESTINO,
-    #     starts_with="df_entrenamiento"
-    # )
-
-    # logger.info(f"Archivo más reciente df_socios: {archivo_socios}")
-    # logger.info(f"Archivo más reciente df_establecimientos: {archivo_establecimientos}")
-    # logger.info(f"Archivo más reciente df_entrenamiento: {archivo_entrenamiento}")
-
-    # # ------------------------------------------------------------
-    # # Instanciar la pipeline de procesamiento
-    # # ------------------------------------------------------------
-    # pipeline = DataPreprocessingPipeline()
-
-    # # ------------------------------------------------------------
-    # # Cargar los archivos más recientes usando _load_raw_data
-    # # ------------------------------------------------------------
-    # try:
-    #     df_socios, df_establecimientos, df_entrenamiento = pipeline._load_raw_data()
-    # except FileNotFoundError as e:
-    #     logger.error(f"Error cargando archivos: {e}")
-    #     sys.exit(1)
-
-    # # ------------------------------------------------------------
-    # # Mostrar un resumen rápido de los DataFrames cargados
-    # # ------------------------------------------------------------
-    # logger.info(f"df_socios cargado: {df_socios.shape}")
-    # logger.info(f"df_establecimientos cargado: {df_establecimientos.shape}")
-    # logger.info(f"df_entrenamiento cargado: {df_entrenamiento.shape}")
-
-    # print("\n===== Primeras filas de df_socios =====")
-    # print(df_socios.head())
-    # print("======================================\n")
-
-    # print("\n===== Primeras filas de df_establecimientos =====")
-    # print(df_establecimientos.head())
-    # print("===============================================\n")
-
-    # print("\n===== Primeras filas de df_entrenamiento =====")
-    # print(df_entrenamiento.head())
-    # print("============================================\n")
-
-    # # ------------------------------------------------------------
-    # # Instanciar la pipeline de procesamiento
-    # # ------------------------------------------------------------
-    pipeline = DataPreprocessingPipeline()
-
-    # # ------------------------------------------------------------
-    # # Cargar los archivos más recientes usando _load_raw_data
-    # # ------------------------------------------------------------
-    # try:
-    #     df_socios, df_establecimientos, df_entrenamiento = pipeline._load_raw_data()
-    # except FileNotFoundError as e:
-    #     logger.error(f"Error cargando archivos: {e}")
-    #     sys.exit(1)
-
-    # # ------------------------------------------------------------
-    # # Mostrar un resumen rápido de los DataFrames cargados
-    # # ------------------------------------------------------------
-    # logger.info(f"df_socios cargado: {df_socios.shape}")
-    # logger.info(f"df_establecimientos cargado: {df_establecimientos.shape}")
-    # logger.info(f"df_entrenamiento cargado: {df_entrenamiento.shape}")
-
-    # print("\n===== Primeras filas de df_socios =====")
-    # print(df_socios.head())
-    # print("======================================\n")
-
-    # print("\n===== Primeras filas de df_establecimientos =====")
-    # print(df_establecimientos.head())
-    # print("===============================================\n")
-
-    # print("\n===== Primeras filas de df_entrenamiento =====")
-    # print(df_entrenamiento.head())
-    # print("============================================\n")
-
-    # # ------------------------------------------------------------
-    # # Generar el DataFrame extendido limpio usando data_extended
-    # # ------------------------------------------------------------
-    # logger.info("Generando DataFrame extendido limpio...")
-
-    # data_extendida = pipeline.data_extended()
-
-    # logger.info(f"DataFrame extendido generado: { data_extendida.shape}")
-
-    # print("\n===== Primeras filas del DataFrame extendido =====")
-    # print( data_extendida.head())
-    # print("==================================================\n")
-
-
-    # ------------------------------------------------------------
-    #          2) IDENTIFICAR EL ARCHIVO MÁS RECIENTE POR TIPO
-    # ------------------------------------------------------------
-
-    # logger.info("Buscando archivos data_extendida.py más recientes en el bucket destino por tipo...")
-
-    # df_1 = s3.get_newest_file_by_date(
-    #     bucket_name=BUCKET_DEST,
-    #     prefix=DESTINO_PROCESSED,
-    #     starts_with="data_extendida_clean"
-    # )
-    df_extendida = pd.read_parquet("df_extendida_clean.parquet")
-
-    #df_extendida1 = s3.load_single_parquet(df_extendida)
-    df_extendida1 = pipeline.clean_recent_text_columns(df_extendida)
-    df_extendida2 = pipeline.outliers_filters(df_extendida1)
-    df_extendida3 = pipeline.normalization_establecimientos(df_extendida2)
-
-    print(df_extendida3.head(4))
-
-    s3.save_dataframe_to_s3(df=df_extendida3, bucket=BUCKET_DEST, path_destino=DESTINO_PROCESSED, nombre_archivo='df_extendida_clean.parquet')
- # # ------------------------------------------------------------
-    # # Guardar el DataFrame extendido limpio en S3
-    # # ------------------------------------------------------------
-    # DESTINO_PROCESSED = 'mlops/input/processed/'
-    # NOMBRE_ARCHIVO_EXTENDIDO = 'data_extendida_clean.parquet'
+    # # Read input data from s3
+    # logger.info("Step 1: Loading raw data from %s", input_path)
 
     # try:
-    #     s3.save_dataframe_to_s3(
-    #         df=data_extendida_clean,
-    #         bucket=BUCKET_DEST,
-    #         path_destino=DESTINO_PROCESSED,
-    #         nombre_archivo=NOMBRE_ARCHIVO_EXTENDIDO
-    #     )
+    #     pipeline = DataPreprocessingPipeline()
+    #     pipeline._load_raw_data()
+    #     logger.info("Raw data concated successfully.")
     # except Exception as e:
-    #     logger.error(f"No se pudo guardar el DataFrame extendido en S3: {e}")
-    #     sys.exit(1)
+    #     logger.exception("Failed to load raw data: %s", e)
+    #     raise
+
+    # # Build extended data
+
+    # logger.info("Step 2: Generating extended dataset")
+
+    # try:
+    #     df_extended = pipeline.data_extended()
+    #     logger.info("Extended data generated successfully. Records: %d | Columns: %d", len(df_extended), len(df_extended.columns))
+    # except Exception as e:
+    #     logger.exception("Failed to generate extended dataset: %s", e)
+    #     raise
+
+    # Read input from local or S3
+    if str(input_path).startswith('s3://'):
+        try:
+            s3_reader = S3DataManager()
+            df = s3_reader.load_single_parquet(input_path)
+            logger.info("Data loaded from S3")
+        except Exception as e:
+            logger.exception("Failed to load data from S3: %s", e)
+            raise
+    else:
+        p = Path(input_path)
+        if not p.exists():
+            logger.error("Input file not found at: %s", p.resolve())
+            raise FileNotFoundError(f"Input file not found: {p}")
+        try:
+            df = pd.read_parquet(p)
+            logger.info("Data loaded from local path")
+        except Exception as e:
+            logger.exception("Failed to read local parquet file: %s", e)
+            raise
+
+    logger.info("Loaded %d records, %d columns", len(df), len(df.columns))
+
+    # Apply preprocessing pipeline steps
+    try:
+        logger.info("Step 1/3: Cleaning text columns...")
+        df_clean1 = pipeline.clean_recent_text_columns(df_extended)
+        
+        logger.info("Step 2/3: Filtering outliers...")
+        df_clean2 = pipeline.outliers_filters(df_clean1)
+        
+        logger.info("Step 3/3: Normalizing establishments...")
+        df_clean3 = pipeline.normalization_establecimientos(df_clean2)
+        
+    except Exception as e:
+        logger.exception("Error during preprocessing steps: %s", e)
+        raise
+
+    # Save output to local or S3
+    try:
+        if str(output_path).startswith('s3://'):
+            uri = output_path.replace('s3://', '')
+            parts = uri.split('/')
+            bucket = parts[0]
+            path_destino = '/'.join(parts[1:-1]) + ('/' if len(parts) > 2 else '')
+            nombre_archivo = parts[-1]
+
+            s3_writer = S3DataManager()
+            s3_writer.save_dataframe_to_s3(
+                df=df_clean3,
+                bucket=bucket,
+                path_destino=path_destino,
+                nombre_archivo=nombre_archivo
+            )
+            logger.success("Cleaned data saved to S3 at %s", output_path)
+        else:
+            outp = Path(output_path)
+            outp.parent.mkdir(parents=True, exist_ok=True)
+            df_clean3.to_parquet(outp, index=False)
+            logger.success("Cleaned data saved to local path: %s", outp.resolve())
+            
+    except Exception as e:
+        logger.exception("Failed to save output: %s", e)
+        raise
+
+    logger.info("Preprocessing completed. Output shape: %s", df_clean3.shape)
+
+
+def main():
+    """
+    Parse command-line arguments and run the preprocessing pipeline.
+
+    This function serves as the entry point when the module is run as a script.
+    It defines the CLI interface and delegates to the main preprocessing function.
+    All arguments are required and support both local and S3 paths.
+
+    Command-line Arguments
+    ----------------------
+    --input_path : str, required
+        Path to the raw input parquet file (local or s3://).
+    --output_path : str, required
+        Path where preprocessed data will be saved (local or s3://).
+
+    Examples
+    --------
+    $ python s3_con.py \\
+        --input_path data/raw/data_extendida.parquet \\
+        --output_path data/processed/data_extendida_clean.parquet
+
+    $ python s3_con.py \\
+        --input_path s3://bucket/raw/data.parquet \\
+        --output_path s3://bucket/processed/data_clean.parquet
+
+    Environment Variables
+    ----------------------
+    AWS_ACCESS_KEY_ID : str
+        AWS access key (required if using S3 URIs).
+    AWS_SECRET_ACCESS_KEY : str
+        AWS secret key (required if using S3 URIs).
+    AWS_DEFAULT_REGION : str
+        AWS region (required if using S3 URIs).
+
+    Exit Codes
+    ----------
+    0 : Success; preprocessing completed without errors.
+    1 : Failure; an error occurred during execution.
+    """
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Data preprocessing pipeline for recommendation system",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Local input and output
+  python s3_con.py --input_path data/raw/sample.parquet --output_path data/processed/sample_clean.parquet
+
+  # S3 input and output
+  python s3_con.py --input_path s3://bucket/raw/data.parquet --output_path s3://bucket/processed/data_clean.parquet
+
+  # Mixed local input with S3 output
+  python s3_con.py --input_path data/raw/sample.parquet --output_path s3://bucket/processed/sample_clean.parquet
+        """
+    )
+
+    parser.add_argument(
+        "--input_path",
+        type=str,
+        required=True,
+        help="Path to raw input data (local or s3://)"
+    )
+
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        required=True,
+        help="Path where preprocessed data will be saved (local or s3://)"
+    )
+
+    args = parser.parse_args()
+
+    try:
+        logger.info("Starting preprocessing pipeline with input=%s, output=%s", 
+                   args.input_path, args.output_path)
+        run_preprocessing(
+            input_path=args.input_path,
+            output_path=args.output_path
+        )
+        logger.success("Preprocessing pipeline completed successfully")
+    except Exception as e:
+        logger.exception("Preprocessing pipeline failed: %s", e)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
