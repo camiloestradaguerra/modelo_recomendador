@@ -146,10 +146,10 @@ jobs:
             --output_path "s3://dcelip-dev-artifacts-s3/mlops/features/" \
             --encoders_path "s3://dcelip-dev-artifacts-s3/mlops/model_artifacts/encoders_features.pkl"
 
-  # ============================================================================
-  # JOB 3: Data Validation
-  # Depends on: feature-engineering
-  # ============================================================================
+  # ============================================================================  
+  # JOB 3: Data Validation  
+  # Depends on: feature-engineering  
+  # ============================================================================  
   data-validation:
     name: Data Validation (Step 3/6)
     runs-on: ubuntu-latest
@@ -161,11 +161,17 @@ jobs:
           name: repository
           path: .
 
-      - name: Download features   # <-- NOMBRE CORREGIDO
+      - name: Download features
         uses: actions/download-artifact@v4
         with:
-          name: features          # <-- USA EL NOMBRE REAL
-          path: data/03-features  # <-- Carpeta donde se guardarán
+          name: features            # artifact con df_features.parquet
+          path: data/03-features
+
+      - name: Download encoders
+        uses: actions/download-artifact@v4
+        with:
+          name: encoders_features    # artifact con encoders_features.pkl
+          path: data/04-encoders     # carpeta donde se guardará
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -189,6 +195,7 @@ jobs:
         run: |
           python src/pipelines/data_validation/main.py \
             --input_path data/03-features/df_features.parquet \
+            --encoders_path data/04-encoders/encoders_features.pkl \
             --output_path reports/data_validation.html
 
       - name: Upload validation report
@@ -197,3 +204,4 @@ jobs:
           name: validation-report
           path: reports/data_validation.html
           retention-days: 30
+
