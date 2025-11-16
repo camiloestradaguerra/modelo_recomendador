@@ -1,0 +1,17 @@
+# Core dependencies
+pandas==2.1.3
+numpy==1.26.2
+
+# AWS and S3
+boto3==1.40.67
+s3fs==2024.3.1
+botocore==1.44.67
+
+# Data serialization
+pyarrow==14.0.1
+
+# Logging
+loguru==0.7.2
+
+# Environment and utilities
+python-dotenv==1.0.0

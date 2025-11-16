@@ -1,0 +1,11 @@
+name: data_cleaning_preprocessing
+
+entry_points:
+  main:
+    parameters:
+      output_path:
+        description: Path where preprocessed data will be saved (local or s3://)
+        type: str
+
+    command: >
+      python main.py --output_path {output_path}

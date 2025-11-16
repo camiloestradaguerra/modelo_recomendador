@@ -1,4 +1,4 @@
-.PHONY: help install test test-coverage clean setup-env run-pipeline run-sampling run-features run-training run-evaluation run-registration run-api lint format
+.PHONY: help install test test-coverage clean setup-env run-pipeline run-cleaning run-sampling run-features run-training run-evaluation run-registration run-api lint format
 
 # Colors for terminal output
 BLUE := \033[0;34m
@@ -32,6 +32,12 @@ test-coverage: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
 	pytest --cov=src --cov-report=html --cov-report=term --cov-report=xml src/pipelines/1-data_sampling/test_sampling.py || true
 	@echo "$(GREEN)✓ Coverage report generated!$(NC)"
+
+run-cleaning: ## Run data cleaning and preprocessing component
+	@echo "$(BLUE)Running data cleaning...$(NC)"
+	uv run src/pipelines/0-cleaning_data/main.py \
+		--output_path data/processed/clean_data.parquet
+	@echo "$(GREEN)✓ Cleaning completed!$(NC)"
 
 run-sampling: ## Run data sampling component
 	@echo "$(BLUE)Running data sampling...$(NC)"
