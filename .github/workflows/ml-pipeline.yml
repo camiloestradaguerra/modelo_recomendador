@@ -212,4 +212,84 @@ jobs:
           name: validation-report
           path: reports/data_validation.html
           retention-days: 30
+  # ============================================================================
+  # JOB 4: Model Training
+  # Depends on: data-validation
+  # ============================================================================
+  model-training:
+    name: Model Training (Step 4/6)
+    runs-on: ubuntu-latest
+    needs: data-validation
+    steps:
+      - name: Download repository
+        uses: actions/download-artifact@v4
+        with:
+          name: repository
 
+      - name: Download features and encoders
+        uses: actions/download-artifact@v4
+        with:
+          name: features-and-encoders
+          path: .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Docker Setup - MLflow
+        run: |
+          docker pull ghcr.io/mlflow/mlflow:latest
+          docker run -d -p 5555:5000 --name mlflow-server \
+            ghcr.io/mlflow/mlflow:latest \
+            mlflow server --host 0.0.0.0 \
+            --backend-store-uri sqlite:///mlflow.db \
+            --default-artifact-root /tmp/mlruns
+
+      - name: Wait for MLflow to be ready
+        run: |
+          echo "Waiting for MLflow server..."
+          for i in {1..30}; do
+            if curl -f http://localhost:5555/health 2>/dev/null; then
+              echo "MLflow is ready!"
+              break
+            fi
+            echo "Attempt $i/30: MLflow not ready yet..."
+            sleep 2
+          done
+
+      - name: Run model training
+        env:
+          MLFLOW_TRACKING_URI: http://localhost:5555
+        run: |
+          python src/pipelines/3-training/main.py \
+            --input_path "s3://dcelip-dev-artifacts-s3/mlops/features/features.parquet" \
+            --model_path models/dnn_model.pth \
+            --encoders_path "s3://dcelip-dev-artifacts-s3/mlops/model_artifacts/encoders_features.pkl"
+            --config_path src/pipelines/3-training/config.yaml
+
+      - name: Clean up Docker
+        if: always()
+        run: |
+          docker stop mlflow-server || true
+          docker rm mlflow-server || true
+
+      - name: Upload trained model
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: models/
+          retention-days: 1
