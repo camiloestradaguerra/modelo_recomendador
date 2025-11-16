@@ -15,8 +15,10 @@ Date: 2025-11-13
 
 import argparse
 import sys
+import io
 from pathlib import Path
 from typing import Dict
+from datetime import datetime
 
 import pandas as pd
 import numpy as np
@@ -24,6 +26,10 @@ from loguru import logger
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
+
+# Import S3DataManager from sibling module
+sys.path.insert(0, str(Path(__file__).parent.parent / "0-cleaning_data"))
+from main import S3DataManager
 
 # Configure logger
 logger.remove()
@@ -165,16 +171,15 @@ def detect_outliers(df: pd.DataFrame) -> Dict:
     return outliers
 
 
-def generate_report(
+def generate_report_html(
     df: pd.DataFrame,
     missing: Dict,
     dtypes: Dict,
     distributions: Dict,
-    outliers: Dict,
-    output_path: str
-) -> None:
+    outliers: Dict
+) -> str:
     """
-    Generate HTML validation report.
+    Generate HTML validation report content.
 
     Parameters
     ----------
@@ -188,8 +193,11 @@ def generate_report(
         Distribution statistics.
     outliers : Dict
         Outlier information.
-    output_path : str
-        Path to save HTML report.
+
+    Returns
+    -------
+    str
+        HTML report content.
     """
     # Create plots
     fig = make_subplots(
@@ -307,7 +315,37 @@ def generate_report(
     </body>
     </html>
     """
+    return html_content
 
+
+def generate_report(
+    df: pd.DataFrame,
+    missing: Dict,
+    dtypes: Dict,
+    distributions: Dict,
+    outliers: Dict,
+    output_path: str
+) -> None:
+    """
+    Generate and save HTML validation report to local path.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe.
+    missing : Dict
+        Missing values statistics.
+    dtypes : Dict
+        Data types information.
+    distributions : Dict
+        Distribution statistics.
+    outliers : Dict
+        Outlier information.
+    output_path : str
+        Path to save HTML report (local path only).
+    """
+    html_content = generate_report_html(df, missing, dtypes, distributions, outliers)
+    
     # Save report
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w') as f:
@@ -319,24 +357,106 @@ def generate_report(
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Validate data quality and generate report")
-    parser.add_argument("--input_path", type=str, required=True, help="Input data path")
-    parser.add_argument("--output_path", type=str, required=True, help="Output report path")
+    parser.add_argument("--input_path", type=str, required=True, help="Input S3 folder containing df_features")
+    parser.add_argument("--output_path", type=str, required=True, help="Output report path (local or S3)")
     args = parser.parse_args()
 
-    logger.info(f"Loading data from {args.input_path}")
-    df = pd.read_parquet(args.input_path)
-    logger.info(f"Loaded {len(df)} records with {len(df.columns)} columns")
+    # Detect if paths are S3
+    is_input_s3 = args.input_path.startswith("s3://")
+    is_output_s3 = args.output_path.startswith("s3://")
 
-    # Run validations
+    # --------------------------
+    # LOAD INPUT FROM S3
+    # --------------------------
+    if is_input_s3:
+        s3_manager = S3DataManager()
+
+        # Parse s3://bucket/prefix/
+        s3_path = args.input_path.replace("s3://", "")
+        parts = s3_path.split("/", 1)
+
+        bucket_input = parts[0]
+        prefix_input = parts[1] if len(parts) > 1 else ""
+
+        logger.info(f"Bucket detectado: {bucket_input}")
+        logger.info(f"Prefix detectado: {prefix_input}")
+
+        # Buscar archivo que empiece por df_features
+        logger.info(f"Buscando archivo más reciente en s3://{bucket_input}/{prefix_input} con inicio 'df_features'")
+        
+        newest_file_path = s3_manager.get_newest_file_by_date(
+            bucket_name=bucket_input,
+            prefix=prefix_input,
+            starts_with="df_features"
+        )
+
+        if not newest_file_path:
+            raise FileNotFoundError(
+                f"No se encontró ningún archivo que inicie con 'df_features' en s3://{bucket_input}/{prefix_input}"
+            )
+
+        logger.info(f"Archivo encontrado: {newest_file_path}")
+
+        df = pd.read_parquet(
+            newest_file_path,
+            storage_options={"key": s3_manager.aws_access_key,
+                             "secret": s3_manager.aws_secret_key}
+        )
+
+    else:
+        # Carga local
+        logger.info(f"Loading data from local path: {args.input_path}")
+        df = pd.read_parquet(args.input_path)
+
+    logger.info(f"Loaded {len(df)} records and {len(df.columns)} columns")
+
+    # --------------------------
+    # VALIDACIONES
+    # --------------------------
     missing = validate_missing_values(df)
     dtypes = validate_data_types(df)
     distributions = validate_distributions(df)
     outliers = detect_outliers(df)
 
-    # Generate report
-    generate_report(df, missing, dtypes, distributions, outliers, args.output_path)
+    # --------------------------
+    # GUARDAR REPORTE
+    # --------------------------
+    html_content = generate_report_html(df, missing, dtypes, distributions, outliers)
+
+    if is_output_s3:
+        s3_manager = S3DataManager()
+
+        out_path = args.output_path.replace("s3://", "")
+        parts = out_path.split("/", 1)
+
+        bucket_output = parts[0]
+        prefix_output = parts[1] if len(parts) > 1 else ""
+
+        if prefix_output and not prefix_output.endswith("/"):
+            prefix_output += "/"
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"validation_report_{timestamp}.html"
+
+        destino = f"s3://{bucket_output}/{prefix_output}{filename}"
+        logger.info(f"Guardando reporte en: {destino}")
+
+        try:
+            with s3_manager.fs.open(destino, "wb") as f:
+                f.write(html_content.encode("utf-8"))
+            logger.success(f"Reporte guardado correctamente en {destino}")
+
+        except Exception as e:
+            logger.error(f"Error guardando reporte en S3: {e}")
+            raise
+
+    else:
+        # LOCAL
+        generate_report(df, missing, dtypes, distributions, outliers, args.output_path)
+        logger.success(f"Reporte guardado en {args.output_path}")
 
     logger.success("Data validation completed!")
+
 
 
 if __name__ == "__main__":
