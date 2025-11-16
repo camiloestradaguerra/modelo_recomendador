@@ -212,6 +212,7 @@ jobs:
           name: validation-report
           path: reports/data_validation.html
           retention-days: 30
+  
   # ============================================================================
   # JOB 4: Model Training
   # Depends on: data-validation
@@ -226,11 +227,12 @@ jobs:
         with:
           name: repository
 
-      - name: Download features and encoders
-        uses: actions/download-artifact@v4
-        with:
-          name: features-and-encoders
-          path: .
+      # 🔥 Reemplazo del artifact GitHub → Descarga desde S3
+      - name: Descargar encoders desde S3
+        run: |
+          echo "Descargando encoders desde S3..."
+          aws s3 cp s3://dcelip-dev-artifacts-s3/mlops/model_artifacts/encoders_features.pkl ./encoders_features.pkl
+          ls -lh ./encoders_features.pkl
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -278,7 +280,7 @@ jobs:
           python src/pipelines/3-training/main.py \
             --input_path "s3://dcelip-dev-artifacts-s3/mlops/features/features.parquet" \
             --model_path models/dnn_model.pth \
-            --encoders_path "s3://dcelip-dev-artifacts-s3/mlops/model_artifacts/encoders_features.pkl"
+            --encoders_path "./encoders_features.pkl" \
             --config_path src/pipelines/3-training/config.yaml
 
       - name: Clean up Docker
