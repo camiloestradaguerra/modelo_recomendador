@@ -67,22 +67,26 @@ jobs:
 
       
 
-  #     - name: Cache pip dependencies
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ~/.cache/pip
-  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-pip-
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('src/pipelines/1-data_sampling/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-  #     - name: Install dependencies
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install -r requirements.txt
+      - name: Install sampling dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/pipelines/1-data_sampling/requirements.txt
 
-  #     - name: Run unit tests with coverage
-  #       run: |
-  #         pytest src/pipelines/1-data_sampling/test_sampling.py -v --cov=src --cov-report=xml --cov-report=html --cov-report=term
+      - name: Run data sampling pipeline
+        run: |
+          python src/pipelines/1-data_sampling/main.py `
+            --input_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" `
+            --output_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" `
+            --sample_size 2000 `
+            --random_state 42
 
   #     - name: Upload coverage to Codecov
   #       uses: codecov/codecov-action@v4

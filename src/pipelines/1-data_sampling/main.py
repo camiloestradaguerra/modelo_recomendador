@@ -20,6 +20,10 @@ from typing import Optional
 import pandas as pd
 from loguru import logger
 
+# Import S3DataManager from cleaning_data pipeline
+sys.path.insert(0, str(Path(__file__).parent.parent / "0-cleaning_data"))
+from main import S3DataManager
+
 # Configure logger
 logger.remove()
 logger.add(
@@ -298,17 +302,67 @@ def run_sampling_pipeline(
     input_file = Path(input_path)
     output_file = Path(output_path)
 
-    # Validate input
-    validate_input_file(input_file)
+    # Detect if input is S3 or local
+    is_input_s3 = input_path.startswith("s3://")
+    is_output_s3 = output_path.startswith("s3://")
+    
+    if is_input_s3:
+        # Initialize S3DataManager
+        s3_manager = S3DataManager()
+        
+        # Parse S3 input path: s3://bucket/prefix
+        s3_path_parts = input_path.replace("s3://", "").split("/", 1)
+        bucket_input = s3_path_parts[0]
+        prefix = s3_path_parts[1] if len(s3_path_parts) > 1 else ""
+        
+        # Get newest file from S3 with filter for "df_extendida_clean"
+        logger.info(f"Buscando archivo más reciente en s3://{bucket_input}/{prefix} con nombre 'df_extendida_clean'")
+        newest_file_path = s3_manager.get_newest_file_by_date(
+            bucket_name=bucket_input, 
+            prefix=prefix,
+            starts_with="df_extendida_clean"
+        )
+        
+        if not newest_file_path:
+            raise FileNotFoundError(f"No se encontró archivo 'df_extendida_clean' en S3: s3://{bucket_input}/{prefix}")
+        
+        # Load data from S3
+        logger.info(f"Cargando datos desde: {newest_file_path}")
+        df = pd.read_parquet(newest_file_path)
+    else:
+        # Local file processing
+        # Validate input
+        validate_input_file(input_file)
 
-    # Load data
-    df = load_data(input_file)
+        # Load data
+        df = load_data(input_file)
 
     # Sample data
     df_sampled = sample_data(df, sample_size, random_state)
 
-    # Save sampled data
-    save_data(df_sampled, output_file)
+    if is_output_s3:
+        # Initialize S3DataManager for output
+        s3_manager = S3DataManager()
+        
+        # Parse S3 output path: s3://bucket/path/
+        s3_path_parts = output_path.replace("s3://", "").split("/", 1)
+        bucket_output = s3_path_parts[0]
+        path_destino = s3_path_parts[1] if len(s3_path_parts) > 1 else ""
+        
+        # Ensure path ends with /
+        if path_destino and not path_destino.endswith("/"):
+            path_destino += "/"
+        
+        nombre_archivo = "df_sampled.parquet"
+        
+        logger.info(f"Guardando datos en S3: s3://{bucket_output}/{path_destino}")
+        
+        # Save sampled data to S3 with timestamp
+        s3_manager.save_dataframe_to_s3(df_sampled, bucket_output, path_destino, nombre_archivo)
+    else:
+        # Local file saving
+        # Save sampled data
+        save_data(df_sampled, output_file)
 
     logger.success("Data sampling pipeline completed successfully!")
 
