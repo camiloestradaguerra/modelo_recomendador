@@ -108,9 +108,9 @@ jobs:
             --sample_size 2000 \
             --random_state 42
 
-  # ============================================================================
-  # JOB 2: Feature Engineering
-  # Depends on: data-sampling
+  # ============================================================================  
+  # JOB 2: Feature Engineering  
+  # Depends on: data-sampling  
   # ============================================================================
   feature-engineering:
     name: Feature Engineering (Step 2/6)
@@ -143,35 +143,45 @@ jobs:
         run: |
           python src/pipelines/2-feature_engineering/main.py \
             --input_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" \
-            --output_path "s3://dcelip-dev-artifacts-s3/mlops/features/" \
-            --encoders_path "s3://dcelip-dev-artifacts-s3/mlops/model_artifacts/encoders_features.pkl"
+            --output_path "data/03-features/df_features.parquet" \
+            --encoders_path "data/04-encoders/encoders_features.pkl"
+
+      - name: Upload features artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: features
+          path: data/03-features/df_features.parquet
+
+      - name: Upload encoders artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: encoders_features
+          path: data/04-encoders/encoders_features.pkl
+
 
   # ============================================================================  
   # JOB 3: Data Validation  
   # Depends on: feature-engineering  
-  # ============================================================================  
+  # ============================================================================
   data-validation:
     name: Data Validation (Step 3/6)
     runs-on: ubuntu-latest
     needs: feature-engineering
     steps:
-      - name: Download repository
-        uses: actions/download-artifact@v4
-        with:
-          name: repository
-          path: .
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Download features
         uses: actions/download-artifact@v4
         with:
-          name: features            # artifact con df_features.parquet
+          name: features
           path: data/03-features
 
       - name: Download encoders
         uses: actions/download-artifact@v4
         with:
-          name: encoders_features    # artifact con encoders_features.pkl
-          path: data/04-encoders     # carpeta donde se guardará
+          name: encoders_features
+          path: data/04-encoders
 
       - name: Set up Python
         uses: actions/setup-python@v5
