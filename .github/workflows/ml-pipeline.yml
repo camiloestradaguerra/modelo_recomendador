@@ -49,49 +49,26 @@ jobs:
             echo "Credenciales AWS presentes en el entorno del pipeline"
           fi
 
-      - name: Install dependencies
+      - name: Install dependencies (pip + uv)
         run: |
-          pip install --upgrade pip
-          pip install --upgrade "s3fs>=2024.3.0" "fsspec>=2024.3.0"
-          pip install pandas pyarrow fastparquet boto3
+          python -m pip install --upgrade pip
+          # Install `uv` so we can run scripts with `uv run` in the runner
+          python -m pip install uv
+          # Install the component-specific requirements (including runtime deps)
+          uv pip install -r src/pipelines/0-cleaning_data/requirements.txt
 
-
-      
       
       # -----------------------------------------------------
       # 5. Run your script (IMPORTANT)
       # -----------------------------------------------------
-      - name: Ejecutar pipeline S3 (s3_con.py)
+      - name: Ejecutar pipeline S3 (cleaning) using uv
         run: |
-          echo "▶️ Iniciando ejecución del script..."
-          python src/pipelines/1-data_sampling/s3_con.py
+          echo "▶️ Iniciando ejecución del script con uv..."
+          uv run src/pipelines/0-cleaning_data/main.py -- --output_path s3://dcelip-dev-artifacts-s3/mlops/input/processed/df_extendida_clean.parquet
           echo "El script finalizó correctamente"
 
 
-      # -----------------------------------------------------
-      # 6. Success message
-      # -----------------------------------------------------
-      - name: Confirmar ejecución exitosa
-        if: success()
-        run: |
-          echo "El script s3_con.py se ejecutó correctamente y los archivos fueron subidos a S3."
-
-      # -----------------------------------------------------
-      # 7. Run your script (IMPORTANT)
-      # -----------------------------------------------------
-      - name: Ejecutar pipeline preprocessing (preprocessing.py)
-        run: |
-          echo "▶️ Iniciando ejecución del script..."
-          python src/pipelines/1-data_sampling/preprocessing.py
-          echo "El script finalizó correctamente"
-
-      # -----------------------------------------------------
-      # 8. Success message
-      # -----------------------------------------------------
-      - name: Confirmar ejecución exitosa
-        if: success()
-        run: |
-          echo "El script s3_con.py se ejecutó correctamente y los archivos fueron subidos a S3."
+      
 
   #     - name: Cache pip dependencies
   #       uses: actions/cache@v4
