@@ -82,10 +82,10 @@ jobs:
 
       - name: Run data sampling pipeline
         run: |
-          python src/pipelines/1-data_sampling/main.py `
-            --input_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" `
-            --output_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" `
-            --sample_size 2000 `
+          python src/pipelines/1-data_sampling/main.py \
+            --input_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" \
+            --output_path "s3://dcelip-dev-artifacts-s3/mlops/input/processed/" \
+            --sample_size 2000 \
             --random_state 42
 
   #     - name: Upload coverage to Codecov
