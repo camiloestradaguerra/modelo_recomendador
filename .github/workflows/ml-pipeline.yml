@@ -49,13 +49,10 @@ jobs:
             echo "Credenciales AWS presentes en el entorno del pipeline"
           fi
 
-      - name: Install dependencies (pip + uv)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install `uv` so we can run scripts with `uv run` in the runner
-          python -m pip install uv
-          # Install the component-specific requirements (including runtime deps)
-          uv pip install -r src/pipelines/0-cleaning_data/requirements.txt
+          pip install -r src/pipelines/0-cleaning_data/requirements.txt
 
       
       # -----------------------------------------------------
@@ -63,8 +60,8 @@ jobs:
       # -----------------------------------------------------
       - name: Ejecutar pipeline S3 (cleaning)
         run: |
-          echo "▶️ Iniciando ejecución del script con python (venv)..."
-          .venv/bin/python src/pipelines/0-cleaning_data/main.py --output_path s3://dcelip-dev-artifacts-s3/mlops/input/processed/df_extendida_clean.parquet
+          echo "▶️ Iniciando ejecución del script..."
+          python src/pipelines/0-cleaning_data/main.py --output_path s3://dcelip-dev-artifacts-s3/mlops/input/processed/df_extendida_clean.parquet
           echo "El script finalizó correctamente"
 
 
