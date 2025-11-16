@@ -159,12 +159,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: repository
+          path: .
 
-      - name: Download features
+      - name: Download features   # <-- NOMBRE CORREGIDO
         uses: actions/download-artifact@v4
         with:
-          name: features-and-encoders
-          path: .
+          name: features          # <-- USA EL NOMBRE REAL
+          path: data/03-features  # <-- Carpeta donde se guardarán
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -187,7 +188,7 @@ jobs:
       - name: Run data validation
         run: |
           python src/pipelines/data_validation/main.py \
-            --input_path data/03-features/features.parquet \
+            --input_path data/03-features/df_features.parquet \
             --output_path reports/data_validation.html
 
       - name: Upload validation report
