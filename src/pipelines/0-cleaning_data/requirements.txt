@@ -5,7 +5,7 @@ numpy==1.26.2
 # AWS and S3
 boto3==1.40.67
 s3fs==2024.3.1
-botocore==1.44.67
+botocore==1.43.67
 
 # Data serialization
 pyarrow==14.0.1
