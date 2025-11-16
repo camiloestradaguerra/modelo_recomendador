@@ -565,10 +565,12 @@ def _load_raw_data_from_s3() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     logger.info("Cargando datos raw desde S3...")
     
     s3 = S3DataManager()
-    
-    bucket_input = 'dcelip-dev-brz-blu-s3'
-    bucket_output = 'dcelip-dev-artifacts-s3'
-    path_raw = 'mlops/input/raw/'
+
+    # Allow CI / runtime configuration via environment variables so
+    # GitHub Actions (or any CI) can inject buckets/paths without code edits.
+    bucket_input = os.getenv('BUCKET_INPUT', 'dcelip-dev-brz-blu-s3')
+    bucket_output = os.getenv('BUCKET_OUTPUT', 'dcelip-dev-artifacts-s3')
+    path_raw = os.getenv('PATH_RAW', 'mlops/input/raw/')
     
     # Definir prefijos de entrada
     prefixes = {
