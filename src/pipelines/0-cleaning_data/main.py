@@ -135,7 +135,7 @@ class S3DataManager:
             return pd.DataFrame()
 
         df_list = []
-        for i, file in enumerate(parquet_files[:24]):
+        for i, file in enumerate(parquet_files[:2]):
             if limit and i >= limit:
                 break
             df = pd.read_parquet(
