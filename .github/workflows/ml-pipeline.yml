@@ -204,10 +204,8 @@ jobs:
       - name: Run data validation
         run: |
           python src/pipelines/data_validation/main.py \
-            --input_path data/03-features/df_features.parquet \
-            --encoders_path data/04-encoders/encoders_features.pkl \
-            --output_path reports/data_validation.html
-
+            --input_path "s3://dcelip-dev-artifacts-s3/mlops/features/" \
+            --output_path "s3://dcelip-dev-artifacts-s3/mlops/evaluation_results/"
       - name: Upload validation report
         uses: actions/upload-artifact@v4
         with:
