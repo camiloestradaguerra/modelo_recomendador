@@ -25,6 +25,10 @@ import pandas as pd
 from loguru import logger
 from sklearn.preprocessing import LabelEncoder
 
+# Import S3DataManager from sibling module
+sys.path.insert(0, str(Path(__file__).parent.parent / "0-cleaning_data"))
+from main import S3DataManager
+
 # Configure logger
 logger.remove()
 logger.add(
@@ -555,8 +559,37 @@ def run_feature_engineering(
     The function automatically drops rows with missing values after feature
     engineering. In production, consider more sophisticated imputation strategies.
     """
-    logger.info(f"Loading data from {input_path}")
-    df = pd.read_parquet(input_path)
+    # Detect if input/output are S3 or local
+    is_input_s3 = input_path.startswith("s3://")
+    is_output_s3 = output_path.startswith("s3://")
+    
+    # Load data
+    if is_input_s3:
+        s3_manager = S3DataManager()
+        
+        # Parse S3 input path: s3://bucket/prefix
+        s3_path_parts = input_path.replace("s3://", "").split("/", 1)
+        bucket_input = s3_path_parts[0]
+        prefix = s3_path_parts[1] if len(s3_path_parts) > 1 else ""
+        
+        # Get newest file from S3 with filter for "df_sampled"
+        logger.info(f"Buscando archivo más reciente en s3://{bucket_input}/{prefix} con nombre 'df_sampled'")
+        newest_file_path = s3_manager.get_newest_file_by_date(
+            bucket_name=bucket_input,
+            prefix=prefix,
+            starts_with="df_sampled"
+        )
+        
+        if not newest_file_path:
+            raise FileNotFoundError(f"No se encontró archivo 'df_sampled' en S3: s3://{bucket_input}/{prefix}")
+        
+        logger.info(f"Cargando datos desde: {newest_file_path}")
+        df = pd.read_parquet(newest_file_path)
+    else:
+        # Local file
+        logger.info(f"Loading data from {input_path}")
+        df = pd.read_parquet(input_path)
+    
     logger.info(f"Loaded {len(df)} records")
 
     # Apply feature engineering
@@ -572,13 +605,61 @@ def run_feature_engineering(
         logger.warning(f"Dropped {dropped_rows} rows with missing values")
 
     # Save transformed data
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    df_transformed.to_parquet(output_file, index=False)
-    logger.success(f"Features saved to {output_path}")
+    if is_output_s3:
+        s3_manager = S3DataManager()
+        
+        # Parse S3 output path: s3://bucket/path/
+        s3_path_parts = output_path.replace("s3://", "").split("/", 1)
+        bucket_output = s3_path_parts[0]
+        path_destino = s3_path_parts[1] if len(s3_path_parts) > 1 else ""
+        
+        # Ensure path ends with /
+        if path_destino and not path_destino.endswith("/"):
+            path_destino += "/"
+        
+        nombre_archivo = "df_features.parquet"
+        
+        logger.info(f"Guardando features en S3: s3://{bucket_output}/{path_destino}")
+        s3_manager.save_dataframe_to_s3(df_transformed, bucket_output, path_destino, nombre_archivo)
+    else:
+        # Local file
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        df_transformed.to_parquet(output_file, index=False)
+        logger.success(f"Features saved to {output_path}")
 
     # Save encoders
-    engineer.save_encoders(Path(encoders_path))
+    if encoders_path.startswith("s3://"):
+        # Save encoders to S3
+        s3_manager = S3DataManager()
+        
+        # Parse S3 encoders path: s3://bucket/path/filename.pkl
+        s3_path_parts = encoders_path.replace("s3://", "").split("/", 1)
+        bucket_encoders = s3_path_parts[0]
+        encoders_full_path = s3_path_parts[1] if len(s3_path_parts) > 1 else "encoders.pkl"
+        
+        # Save encoders dict as pickle to S3
+        import io
+        encoder_dict = {
+            'label_encoders': engineer.label_encoders,
+            'establishment_encoder': engineer.establishment_encoder
+        }
+        
+        pkl_buffer = io.BytesIO()
+        joblib.dump(encoder_dict, pkl_buffer)
+        pkl_buffer.seek(0)
+        
+        ruta_s3_destino = f"s3://{bucket_encoders}/{encoders_full_path}"
+        try:
+            with s3_manager.fs.open(ruta_s3_destino, 'wb') as f:
+                f.write(pkl_buffer.getvalue())
+            logger.success(f"Encoders saved to {ruta_s3_destino}")
+        except Exception as e:
+            logger.error(f"Error saving encoders to S3: {e}")
+            raise
+    else:
+        # Save encoders to local path
+        engineer.save_encoders(Path(encoders_path))
 
     logger.success("Feature engineering pipeline completed!")
 
