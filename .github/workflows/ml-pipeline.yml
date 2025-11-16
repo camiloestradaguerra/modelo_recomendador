@@ -63,10 +63,10 @@ jobs:
       # -----------------------------------------------------
       # 5. Run your script (IMPORTANT)
       # -----------------------------------------------------
-      - name: Ejecutar pipeline S3 (cleaning) using uv
+      - name: Ejecutar pipeline S3 (cleaning)
         run: |
-          echo "▶️ Iniciando ejecución del script con uv..."
-          .venv/bin/uv run src/pipelines/0-cleaning_data/main.py -- --output_path s3://dcelip-dev-artifacts-s3/mlops/input/processed/df_extendida_clean.parquet
+          echo "▶️ Iniciando ejecución del script con python (venv)..."
+          .venv/bin/python src/pipelines/0-cleaning_data/main.py --output_path s3://dcelip-dev-artifacts-s3/mlops/input/processed/df_extendida_clean.parquet
           echo "El script finalizó correctamente"
 
 
