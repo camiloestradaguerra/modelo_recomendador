@@ -43,3 +43,7 @@ colorama==0.4.6
 
 # Visualization
 plotly==5.18.0
+
+# AWS / S3
+boto3==1.40.67
+s3fs==2024.3.1
